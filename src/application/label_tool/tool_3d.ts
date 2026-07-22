@@ -2330,7 +2330,7 @@ class LabelTool3D {
                 scale = new Vector3(
                     Math.abs(groundPointMouseUp.x - this.groundPointMouseDown.x),
                     Math.abs(groundPointMouseUp.y - this.groundPointMouseDown.y),
-                    (this.labelTool.defaultObjectSizes[objectClass][2]) ?? this.labelTool.defaultObjectSizes.default[2]
+                    (this.labelTool.defaultObjectSizes[objectClass]?.[2]) ?? this.labelTool.defaultObjectSizes.default[2]
                 );
             } else if (this.labelTool.defaultObjectSizes[objectClass]?.length === 3) {
                 scale = new Vector3(
@@ -2689,33 +2689,46 @@ class LabelTool3D {
         box.attributes = attributes;
 
         const postAdjustment = (box: AnnotationObjectParams) => {
-            // project bounding box to 2D image
-            this.labelToolImage.projectBoundingBoxToImage(box);
-
-            this.annotationObjects.set(insertIndex, box);
-            this.selectAnnotationBox(insertIndex, box);
-
-            // hide track id tooltip
-            $("#tooltip-" + this.annotationObjects.contents[fileIndex][insertIndex]["class"] + "-" + this.annotationObjects.contents[fileIndex][insertIndex]["trackId"]).hide();
-
-            // move left button to right
-            $("#left-btn").css("left", window.innerWidth / 3);
-            this.showHelperViews(pos.x, pos.y, pos.z)
-
-            this.annotationObjects.__insertIndex++;
-            this.annotationObjects.select(insertIndex);
-            if (this.labelTool.frameAnnotationType === "continuous_sequence") {
-                let interpolationModeCheckbox = document.getElementById("interpolation-checkbox");
-                this.enableInterpolationModeCheckbox(interpolationModeCheckbox);
-
-                if (this.interpolationMode === true) {
-                    this.interpolationObjIndexCurrentFile = insertIndex;
+            try {
+                // Ensure labelToolImage and annotationObjects are initialized
+                if (!this.labelToolImage || !this.annotationObjects) {
+                    throw new Error("labelToolImage or annotationObjects is not initialized.");
                 }
+
+                // project bounding box to 2D image
+                this.labelToolImage.projectBoundingBoxToImage(box);
+
+                this.annotationObjects.set(insertIndex, box);
+                this.selectAnnotationBox(insertIndex, box);
+
+                // hide track id tooltip
+                $("#tooltip-" + this.annotationObjects.contents[fileIndex][insertIndex]["class"] + "-" + this.annotationObjects.contents[fileIndex][insertIndex]["trackId"]).hide();
+
+                // move left button to right
+                $("#left-btn").css("left", window.innerWidth / 3);
+                this.showHelperViews(pos.x, pos.y, pos.z);
+
+                this.annotationObjects.__insertIndex++;
+                this.annotationObjects.select(insertIndex);
+                if (this.labelTool.frameAnnotationType === "continuous_sequence") {
+                    let interpolationModeCheckbox = document.getElementById("interpolation-checkbox");
+                    this.enableInterpolationModeCheckbox(interpolationModeCheckbox);
+
+                    if (this.interpolationMode === true) {
+                        this.interpolationObjIndexCurrentFile = insertIndex;
+                    }
+                }
+            } catch (error) {
+                console.error("Error in postAdjustment:", error);
             }
-        }
+        };
 
         if (!undo) {
-            this.predictBoxRotationScalePosition(box, true).then((box: AnnotationObjectParams) => postAdjustment(box));
+            this.predictBoxRotationScalePosition(box, true)
+                .then((box: AnnotationObjectParams) => postAdjustment(box))
+                .catch((error) => {
+                    console.error("Error in predictBoxRotationScalePosition:", error);
+                });
         } else {
             postAdjustment(box);
         }
@@ -2970,6 +2983,10 @@ class LabelTool3D {
     }
 
     pointsForBox(points: Points, position: Vector3, rotation: Euler, scale: Vector3): number[][] {
+        if (!points || !points.geometry) {
+            console.warn(`points is null`);
+            return []; // no point cloud loaded for this frame — treat as empty
+        }
         const pos_array = points.geometry.getAttribute("position").array;
         const relative_position_wo_rotation: number[][] = [];
 

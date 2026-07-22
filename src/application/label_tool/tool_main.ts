@@ -174,7 +174,12 @@ class LabelTool {
 
         this.lidarChannels = this.config.datasets[this.currentDatasetIdx].lidar_channels;
         this.cameraChannels = this.config.datasets[this.currentDatasetIdx].camera_channels;
-        this.currentLidarChannel = this.config.datasets[this.currentDatasetIdx].lidar_channels[0];
+        if (this.lidarChannels && this.lidarChannels.length > 0) {
+            this.currentLidarChannel = this.lidarChannels[0];
+        } else {
+            console.warn("No lidar channels available. Using empty point cloud.");
+            this.currentLidarChannel = ""; // Set to an empty string or a default value
+        }
         this.currentCameraChannel = this.config.datasets[this.currentDatasetIdx].camera_channels[0];
 
         this.numFrames = this.config.datasets[this.currentDatasetIdx].num_frames;
@@ -207,7 +212,11 @@ class LabelTool {
         }
 
         this.pointCloudFileNames = FileOperations.loadFileNames("point_cloud_filenames.txt", this);
-        this.numFrames = this.pointCloudFileNames.length;
+        if (this.pointCloudFileNames.length === 0) {
+            console.warn("point_cloud_filenames.txt is empty or missing — falling back to config num_frames");
+        } else {
+            this.numFrames = this.pointCloudFileNames.length;
+        }
 
         for (let i = 0; i < this.numFrames; i++) {
             fileNameArray.push(Utils.pad(i, 6, 0))
@@ -476,28 +485,37 @@ class LabelTool {
 
         for (let i = 0; i < this.cameraChannels.length; i++) {
             let imageId: string = "#image-" + this.cameraChannels[i].channel.toLowerCase().replace(/_/g, '-');
+    
             $(imageId).css("height", imageHeight);
-
+    
             // bring all svgs of current channel into background (set z index to 0)
             let allSvg = $(imageId + " svg");
+    
             let imgWidth = this.canvasSize[0];
             let imgHeight = this.canvasSize[1];
-
+    
             for (let j = 0; j < allSvg.length; j++) {
                 allSvg[j].style.width = String(imgWidth);
                 allSvg[j].style.height = String(imgHeight);
                 allSvg[j].style.zIndex = String(0);
                 allSvg[j].style.position = "absolute";
-
+    
                 let posLeft = 0;
                 posLeft = i * imgWidth;
                 allSvg[j].style.left = posLeft + "px";
             }
-            allSvg[this.numFrames - newFileIndex - 1].style.zIndex = String(2);
+    
+            let zIndexTarget = this.numFrames - newFileIndex - 1;
+            allSvg[zIndexTarget].style.zIndex = String(2);
         }
     }
 
     loadAnnotations(fileName: string, fileIndex: number) {
+        console.warn(`fileName ${fileName}`)
+        if (!fileName) {
+            console.warn(`No annotation filename registered for frame ${fileIndex}, skipping.`);
+            return;
+        }
         const res = FileOperations.parseAnnotationFile(fileName, this);
         getLoader(this).loadAnnotations(res, fileIndex, this);
     }

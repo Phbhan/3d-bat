@@ -296,7 +296,7 @@ text {
     color: #969696;
 }
 
-#image-s110-camera-basler-south2-8mm, #image-s110-camera-basler-south1-8mm, #image-s110-camera-basler-north-8mm, #image-s110-camera-basler-east-8mm, #image-vehicle-camera-basler-16mm{
+#image-cam-front, #image-cam-front-left, #image-cam-front-right, #image-cam-back{
     position: absolute;
     top: 0px;
 }

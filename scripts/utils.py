@@ -109,7 +109,7 @@ def rename_files_by_timestamps_only(seq_dir):
 
 def create_files(input_folder_path_drive):
     channel_names = os.listdir(os.path.join(input_folder_path_drive, 'images'))
-    channel_names = [i for i in channel_names if 'camera' in i]
+    channel_names = [i for i in channel_names if 'CAM' in i]
 
     ext = sorted(glob.glob(os.path.join(input_folder_path_drive, 'images', channel_names[0], '*')))[0].split('.')[-1]
     for channel in channel_names:
@@ -134,7 +134,7 @@ def create_files(input_folder_path_drive):
         for name in pcd_filenames:
             pcd_writer.write(name + '\n')
 
-    anno_dir = os.path.join(input_folder_path_drive, 'annotations','s110_lidar_ouster_south_and_vehicle_lidar_robosense_registered')
+    anno_dir = os.path.join(input_folder_path_drive, 'annotations')
     annotation_file_names = sorted(glob.glob(os.path.join(anno_dir, '*.json')))
     annotation_file_names = [i.split('/')[-1] for i in annotation_file_names]
     annos_txt = os.path.join(input_folder_path_drive, 'annotation_filenames.txt')

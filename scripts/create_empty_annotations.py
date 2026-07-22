@@ -44,3 +44,9 @@ if __name__ == "__main__":
     output_folder_path_annotations = args.output_folder_path_annotations
 
     create_empty_annotations(input_folder_path_point_clouds, output_folder_path_annotations)
+
+    """
+    python scripts/create_empty_annotations.py \
+    --input_folder_path_point_clouds input/hanpb2/20260710_1005_VF6_03_1783652730_1783654253/point_clouds/LIDAR_TOP \
+    --output_folder_path_annotations input/hanpb2/20260710_1005_VF6_03_1783652730_1783654253/annotations
+    """

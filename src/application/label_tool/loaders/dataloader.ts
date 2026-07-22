@@ -8,6 +8,11 @@ import THREE = require("three");
 export class dataLoader implements AnnotationsLoader {
     getFilename = (labelTool: LabelTool, i: number) => labelTool.annotationFileNames[i];
     loadAnnotations = (frameObject: any, fileIndex: number, labelTool: LabelTool) => {
+        if (!frameObject?.openlabel?.frames) {
+            console.warn(`No annotation data for frame ${fileIndex} — treating as empty frame.`);
+            labelTool.frameProperties[fileIndex] = {};
+            return;
+        }
         const frames = frameObject.openlabel.frames;
         const index = parseInt(Object.keys(frames)[0]);
         let frameProperties = {};

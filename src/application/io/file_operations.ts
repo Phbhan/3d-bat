@@ -36,7 +36,7 @@ class FileOperations {
 
     static annotationFileExist(fileIndex, channel, labelTool) {
         let url;
-        url = 'input/' + labelTool.currentDataset + '/' + labelTool.currentSequence + '/annotations/' + labelTool.currentLidarChannel + '/' + labelTool.fileNames[fileIndex]
+        url = 'input/' + labelTool.currentDataset + '/' + labelTool.currentSequence + '/annotations/' + labelTool.fileNames[fileIndex] + ".json"
         let http = new XMLHttpRequest();
         http.open('HEAD', url, false);
         http.send();
@@ -49,7 +49,7 @@ class FileOperations {
         let frameAnnotations: any[] = [];
 
         try {
-            rawFile.open("GET", '../../input/' + labelTool.currentDataset + '/' + labelTool.currentSequence + '/annotations/' + labelTool.currentLidarChannel['channel'] + '/' + fileName, false);
+            rawFile.open("GET", '../../input/' + labelTool.currentDataset + '/' + labelTool.currentSequence + '/annotations/'  + fileName, false);
 
         } catch (error) {
             // no labels available for this camera image
