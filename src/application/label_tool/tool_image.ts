@@ -148,90 +148,49 @@ class LabelToolImage{
         }
     }
 
-    calculateProjectedBoundingBox(xPos: number, yPos: number, zPos: number, length: number, width: number, height: number, yaw: number, channelName: string) {
-        let channelIdx = Utils.getChannelIndexByName(this.labelTool.cameraChannels, channelName);
+    /**
+     * Projects ONE box into ALL camera channels in a single request to the
+     * Python backend (/project_bounding_box), instead of computing the
+     * projection client-side. Batched across channels so callers only pay
+     * for one HTTP round-trip per box update, not one per channel.
+     */
+    async calculateProjectedBoundingBoxAllChannels(
+        xPos: number, yPos: number, zPos: number,
+        length: number, width: number, height: number, yaw: number
+    ): Promise<{ [channel: string]: Vector2[] }> {
+        const channels = this.labelTool.cameraChannels.map((ch, idx) => {
+            return {
+                channel: ch.channel,
+                zoomFactor: this.labelTool.imageScale[idx]
+            };
+        });
 
-        let x_dir = this.labelTool.coordinateSystem['x-axis'];
-        let y_dir = this.labelTool.coordinateSystem['y-axis'];
-        let z_dir = this.labelTool.coordinateSystem['z-axis'];
-
-        const cornerPoints: Vector3[] = [];
-        if (x_dir == 'forward' && y_dir == 'left' && z_dir == 'up') {
-            cornerPoints.push(new THREE.Vector3(xPos - length / 2, yPos - width / 2, zPos - height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos + length / 2, yPos - width / 2, zPos - height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos + length / 2, yPos + width / 2, zPos - height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos - length / 2, yPos + width / 2, zPos - height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos - length / 2, yPos - width / 2, zPos + height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos + length / 2, yPos - width / 2, zPos + height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos + length / 2, yPos + width / 2, zPos + height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos - length / 2, yPos + width / 2, zPos + height / 2));
+        const response = await fetch('/project_bounding_box', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                box: { x: xPos, y: yPos, z: zPos, length, width, height, yaw },
+                coordinateSystem: this.labelTool.coordinateSystem,
+                channels
+            })
+        });
+        if (!response.ok) {
+            throw new Error('Projection request failed: ' + response.status);
         }
-
-        else if (x_dir == 'forward' && y_dir == 'right' && z_dir == 'up') {
-            cornerPoints.push(new THREE.Vector3(xPos - length / 2, yPos + width / 2, zPos - height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos + length / 2, yPos + width / 2, zPos - height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos + length / 2, yPos - width / 2, zPos - height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos - length / 2, yPos - width / 2, zPos - height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos - length / 2, yPos + width / 2, zPos + height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos + length / 2, yPos + width / 2, zPos + height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos + length / 2, yPos - width / 2, zPos + height / 2));
-            cornerPoints.push(new THREE.Vector3(xPos - length / 2, yPos - width / 2, zPos + height / 2));
+        const result: { [channel: string]: number[][] } = await response.json();
+        console.log("result: ", result);
+        
+        const converted: { [channel: string]: Vector2[] } = {};
+        for (const channel in result) {
+            converted[channel] = result[channel].map(pt => new THREE.Vector2(pt[0], pt[1]));
         }
+        return converted;
+    }
 
-        const rotationMatrix = new THREE.Matrix4();
-        rotationMatrix.makeRotationFromEuler(new THREE.Euler(0, 0, yaw, 'XYZ'));
-        const projectedPoints: Vector2[] = [];
-        for (let cornerPoint in cornerPoints) {
-            let point = cornerPoints[cornerPoint];
-            let point4D = new THREE.Vector4(point.x - xPos, point.y - yPos, point.z - zPos, 1);
-            let point4DRotated = point4D.applyMatrix4(rotationMatrix);
-            let point4DHomogeneous = [point4DRotated.x + xPos, point4DRotated.y + yPos, point4DRotated.z + zPos, 1];
-
-            // transform 3D point from s110_lidar_ouster_south to vehicle_lidar_robosense if current channel is vehicle_camera_basler_16mm
-            if (channelName === "vehicle_camera_basler_16mm") {
-                const currentFileIdx = this.labelTool.currentFrameIndex;
-                const frame_properties = this.labelTool.frameProperties[currentFileIdx];
-                const vehicleToInfrastructureTransformationMatrix = frame_properties["transforms"]["vehicle_lidar_robosense_to_s110_lidar_ouster_south"]["transform_src_to_dst"]["matrix4x4"];
-                // convert to THREE.js 4x4 matrix
-                const vehicleToInfrastructureTransformationMatrix4x4 = new THREE.Matrix4();
-                vehicleToInfrastructureTransformationMatrix4x4.set(
-                    vehicleToInfrastructureTransformationMatrix[0][0], vehicleToInfrastructureTransformationMatrix[0][1], vehicleToInfrastructureTransformationMatrix[0][2], vehicleToInfrastructureTransformationMatrix[0][3],
-                    vehicleToInfrastructureTransformationMatrix[1][0], vehicleToInfrastructureTransformationMatrix[1][1], vehicleToInfrastructureTransformationMatrix[1][2], vehicleToInfrastructureTransformationMatrix[1][3],
-                    vehicleToInfrastructureTransformationMatrix[2][0], vehicleToInfrastructureTransformationMatrix[2][1], vehicleToInfrastructureTransformationMatrix[2][2], vehicleToInfrastructureTransformationMatrix[2][3],
-                    vehicleToInfrastructureTransformationMatrix[3][0], vehicleToInfrastructureTransformationMatrix[3][1], vehicleToInfrastructureTransformationMatrix[3][2], vehicleToInfrastructureTransformationMatrix[3][3]
-                );
-                const infraToVehicleTransformationMatrix = vehicleToInfrastructureTransformationMatrix4x4.clone().invert();
-                const point4DHomogeneousVector = new THREE.Vector4(point4DHomogeneous[0], point4DHomogeneous[1], point4DHomogeneous[2], point4DHomogeneous[3]);
-                point4DHomogeneousVector.applyMatrix4(infraToVehicleTransformationMatrix);
-                point4DHomogeneous = [point4DHomogeneousVector.x, point4DHomogeneousVector.y, point4DHomogeneousVector.z, point4DHomogeneousVector.w];
-            }
-
-            let projectionMatrix;
-            projectionMatrix = this.labelTool.cameraChannels[channelIdx].projectionMatrix;
-            let point2D = MathUtils.matrixProduct3x4(projectionMatrix, point4DHomogeneous);
-
-            if (point2D[2] > 0) {
-                // add only points that are in front of camera
-
-                let windowX = (point2D[0] / point2D[2]);
-                let windowY = (point2D[1] / point2D[2]);
-
-                const zoomFactor = this.labelTool.imageScale[channelIdx];
-                const cursorX = this.labelTool.currentImageArray[channelIdx]['cursorX'];
-                const cursorY = this.labelTool.currentImageArray[channelIdx]['cursorY'];
-
-
-                projectedPoints.push(new THREE.Vector2(
-                    windowX * zoomFactor ,
-                    windowY * zoomFactor));
-
-            }
-            else {
-                // do not draw bounding box if it is too close to camera or behind
-                return [];
-            }
-        }
-        return projectedPoints;
+    /** Single-channel convenience wrapper around calculateProjectedBoundingBoxAllChannels. */
+    async calculateProjectedBoundingBox(xPos: number, yPos: number, zPos: number, length: number, width: number, height: number, yaw: number, channelName: string): Promise<Vector2[]> {
+        const all = await this.calculateProjectedBoundingBoxAllChannels(xPos, yPos, zPos, length, width, height, yaw);
+        return all[channelName] ?? [];
     }
 
     calculateAndDrawLineSegments(channelObj, className: string, selected: boolean) {
@@ -246,6 +205,7 @@ class LabelToolImage{
         } else {
             color = this.annotationClasses.annotationClasses[className].color;
         }
+        console.log("channelObj: ", channelObj);
 
         // bottom four lines
         lineArray.push(this.drawLine(channelIdx, channelObj.projectedPoints[0], channelObj.projectedPoints[1], color)!);
@@ -296,30 +256,27 @@ class LabelToolImage{
         return normalized2DBoxPositions;
     }
 
-    update2DBoundingBox(fileIndex, objectIndex, isSelected) {
+    async update2DBoundingBox(fileIndex, objectIndex, isSelected) {
         if (objectIndex >= this.annotationObjects.contents[fileIndex].length) {
             console.log("objectIndex out of bounds");
             return;
         }
-        let className = this.annotationObjects.contents[fileIndex][objectIndex].class;
-        for (let channelObjectIdx in this.annotationObjects.contents[fileIndex][objectIndex].channels) {
-            if (this.annotationObjects.contents[fileIndex][objectIndex].channels.hasOwnProperty(channelObjectIdx)) {
-                let channelObj = this.annotationObjects.contents[fileIndex][objectIndex].channels[channelObjectIdx];
+        const obj = this.annotationObjects.contents[fileIndex][objectIndex];
+        const className = obj.class;
+
+        // one batched request covering every channel, instead of one request per channel
+        const projectedByChannel = await this.calculateProjectedBoundingBoxAllChannels(
+            obj["x"], obj["y"], obj["z"], obj["length"], obj["width"], obj["height"], obj["rotationYaw"]
+        );
+
+        for (let channelObjectIdx in obj.channels) {
+            if (obj.channels.hasOwnProperty(channelObjectIdx)) {
+                let channelObj = obj.channels[channelObjectIdx];
                 if (channelObj.channel !== '') {
-                    let x = this.annotationObjects.contents[fileIndex][objectIndex]["x"];
-                    let y = this.annotationObjects.contents[fileIndex][objectIndex]["y"];
-                    let z = this.annotationObjects.contents[fileIndex][objectIndex]["z"];
-                    let length = this.annotationObjects.contents[fileIndex][objectIndex]["length"];
-                    let width = this.annotationObjects.contents[fileIndex][objectIndex]["width"];
-                    let height = this.annotationObjects.contents[fileIndex][objectIndex]["height"];
-                    let rotationYaw = this.annotationObjects.contents[fileIndex][objectIndex]["rotationYaw"];
-                    let rotationPitch = this.annotationObjects.contents[fileIndex][objectIndex]["rotationPitch"];
-                    let rotationRoll = this.annotationObjects.contents[fileIndex][objectIndex]["rotationRoll"];
-                    let channel = channelObj.channel;
-                    channelObj.projectedPoints = this.calculateProjectedBoundingBox(x, y, z, length, width, height, rotationYaw, channel);
+                    channelObj.projectedPoints = projectedByChannel[channelObj.channel] ?? [];
                     // remove previous drawn lines of all 6 channels
                     this.removeProjectedBoundingBox(channelObj);
-                    if (channelObj.projectedPoints !== undefined && channelObj.projectedPoints.length === 8) {
+                    if (channelObj.projectedPoints.length === 8) {
                         channelObj.lines = this.calculateAndDrawLineSegments(channelObj, className, isSelected);
                     }
                 }
@@ -340,12 +297,16 @@ class LabelToolImage{
         }
     }
 
-    projectBoundingBoxToImage(box: AnnotationObjectParams) {
-        // calculate projected points for each channel
+    async projectBoundingBoxToImage(box: AnnotationObjectParams) {
+        // one batched request for all channels
+        const projectedByChannel = await this.calculateProjectedBoundingBoxAllChannels(
+            box.x, box.y, box.z, box.length, box.width, box.height, box.rotationYaw
+        );
+        console.log("projectedByChannel: ", projectedByChannel);
+
         for (let i = 0; i < this.labelTool.cameraChannels.length; i++) {
             let channel = this.labelTool.cameraChannels[i].channel;
-            let projectedBoundingBox = this.calculateProjectedBoundingBox(box.x, box.y, box.z, box.length, box.width, box.height, box.rotationYaw, channel);
-            box.channels[i].projectedPoints = projectedBoundingBox;
+            box.channels[i].projectedPoints = projectedByChannel[channel] ?? [];
         }
 
         // calculate 2D line segments
@@ -359,49 +320,57 @@ class LabelToolImage{
         }
     }
 
-    projectPoints(points3D, channelIdx: number) {
+    async projectPoints(points3D, channelIdx: number) {
         const labelTool3D = this.labelTool.getLabelTool3D();
-        const points2D: { x: number, y: number }[] = [];
-        labelTool3D.currentPoints3D = [];
-        labelTool3D.currentDistances = [];
-        let projectionMatrix;
-        let scalingFactor;
 
         const imagePanelHeight = parseInt($("#layout_layout_resizer_top").css("top"), 10);
-        scalingFactor = this.imageHeightOriginal / imagePanelHeight;
+        const scalingFactor = this.imageHeightOriginal / imagePanelHeight;
+        const projectionMatrix = this.labelTool.cameraChannels[channelIdx].projectionMatrix;
 
-        projectionMatrix = this.labelTool.cameraChannels[channelIdx].projectionMatrix;
-
-        for (let i = 0; i < points3D.length; i++) {
-            const point3D = points3D[i];
-            const point2D = MathUtils.matrixProduct3x4(projectionMatrix, point3D);
-            if (point2D[2] > 0) {
-                // use only points that are in front of the camera
-                let windowX = point2D[0] / point2D[2];
-                let windowY = point2D[1] / point2D[2];
-                labelTool3D.currentPoints3D.push(point3D);
-                // calculate distance
-                let distance = Math.sqrt(Math.pow(point3D[0], 2) + Math.pow(point3D[1], 2) + Math.pow(point3D[2], 2));
-                labelTool3D.currentDistances.push(distance);
-                points2D.push({x: windowX / scalingFactor, y: windowY / scalingFactor});
-            }
+        const response = await fetch('/project_points', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                points3D: points3D,
+                projectionMatrix: projectionMatrix,
+                scalingFactor: scalingFactor
+            })
+        });
+        if (!response.ok) {
+            throw new Error('Point projection request failed: ' + response.status);
         }
-        return points2D;
+        const result = await response.json();
 
+        // kept for compatibility with any other code reading these fields directly;
+        // NOTE: unreliable when multiple channels are projected in parallel (see
+        // showProjectedPoints below, which uses the returned `distances` instead).
+        labelTool3D.currentPoints3D = result.points3D;
+        labelTool3D.currentDistances = result.distances;
 
+        return {
+            points2D: result.points2D.map((pt: number[]) => ({ x: pt[0], y: pt[1] })),
+            distances: result.distances as number[]
+        };
     }
 
-    showProjectedPoints(points3D) {
+    async showProjectedPoints(points3D) {
         let labelTool3D = this.labelTool.getLabelTool3D();
+        // project all channels in parallel
+        const perChannelResults = await Promise.all(
+            this.labelTool.cameraChannels.map((_, channelIdx) => this.projectPoints(points3D, channelIdx))
+        );
         for (let channelIdx = 0; channelIdx < this.labelTool.cameraChannels.length; channelIdx++) {
             let paper = this.paperArrayAll[this.labelTool.currentFrameIndex][channelIdx];
-            let points2D = this.projectPoints(points3D, channelIdx);
-            labelTool3D.normalizeDistances();
+            const { points2D, distances } = perChannelResults[channelIdx];
+            // normalize this channel's distances independently (matches original
+            // per-channel sequential behavior; a shared normalizeDistances() call
+            // would be wrong here since channels are now computed in parallel)
+            const maxDistance = distances.length > 0 ? Math.max(...distances) : 1;
+            const normalizedDistances = distances.map(d => (d / maxDistance) * 255);
             for (let i = 0; i < points2D.length; i++) {
                 let pt2D = points2D[i];
                 let circle = paper.circle(pt2D.x, pt2D.y, 1);
-                let distance = labelTool3D.currentDistances[i];
-                let color = labelTool3D.colorMap[Math.floor(distance)];
+                let color = labelTool3D.colorMap[Math.floor(normalizedDistances[i])];
                 circle.attr("stroke", color);
                 circle.attr("stroke-width", 1);
                 this.circleArray.push(circle);
@@ -417,13 +386,16 @@ class LabelToolImage{
         }
     }
 
-    draw2DProjection(params) {
+    async draw2DProjection(params) {
+        const projectedByChannel = await this.calculateProjectedBoundingBoxAllChannels(
+            params.x, params.y, params.z, params.length, params.width, params.height, params.rotationYaw
+        );
         for (let i = 0; i < params.channels.length; i++) {
             if (params.channels[i].channel !== undefined && params.channels[i].channel !== "") {
-                params.channels[i].projectedPoints = this.calculateProjectedBoundingBox(params.x, params.y, params.z, params.length, params.width, params.height, params.rotationYaw, params.channels[i].channel);
+                params.channels[i].projectedPoints = projectedByChannel[params.channels[i].channel] ?? [];
                 // calculate line segments
                 let channelObj = params.channels[i];
-                if (params.channels[i].projectedPoints !== undefined && params.channels[i].projectedPoints.length === 8) {
+                if (params.channels[i].projectedPoints.length === 8) {
                     params.channels[i].lines = this.calculateAndDrawLineSegments(channelObj, params.class, false);
                 }
             }
@@ -431,17 +403,18 @@ class LabelToolImage{
     }
 
 
-    draw2DProjections() {
+    async draw2DProjections() {
         if (this.annotationObjects.contents !== undefined && this.annotationObjects.contents.length > 0) {
-            for (let j = 0; j < this.annotationObjects.contents[this.labelTool.currentFrameIndex].length; j++) {
-                let annotationObj = this.annotationObjects.contents[this.labelTool.currentFrameIndex][j];
+            const frameContents = this.annotationObjects.contents[this.labelTool.currentFrameIndex];
+            // project all boxes in the frame in parallel, rather than one-at-a-time
+            await Promise.all(frameContents.map(async (annotationObj, j) => {
                 let params = this.annotationObjects.setObjectParameters(annotationObj);
-                this.draw2DProjection(params);
+                await this.draw2DProjection(params);
                 // set new params
                 for (let i = 0; i < annotationObj["channels"].length; i++) {
-                    this.annotationObjects.contents[this.labelTool.currentFrameIndex][j]["channels"][i]["lines"] = params["channels"][i]["lines"];
+                    frameContents[j]["channels"][i]["lines"] = params["channels"][i]["lines"];
                 }
-            }
+            }));
         }
     }
 

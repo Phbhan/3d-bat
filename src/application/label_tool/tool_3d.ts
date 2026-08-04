@@ -153,8 +153,11 @@ class LabelTool3D {
     // GUI Folders
     folderBoundingBox3DArray: dat.gui.GUI[] = [];
     folderPositionArray: dat.Gui[] = [];
+    positionControllersArray: { x: dat.GUI.Controller, y: dat.GUI.Controller, z: dat.GUI.Controller }[] = [];
     folderRotationArray: dat.Gui[] = [];
+    rotationControllersArray: { yaw: dat.GUI.Controller, pitch: dat.GUI.Controller, roll: dat.GUI.Controller }[] = [];
     folderSizeArray: dat.Gui[] = [];
+    sizeControllersArray: { length: dat.GUI.Controller, width: dat.GUI.Controller, height: dat.GUI.Controller }[] = [];
     folderAttributeArray: dat.dat.Gui[] = [];
     folderEndPosition: dat.dat.Gui;
     folderEndSize: dat.dat.Gui;
@@ -1336,6 +1339,7 @@ class LabelTool3D {
         // update 2d bounding box
         if (this.dragControls === true) {
             if (this.selectedMesh !== undefined) {
+                this.selectedMesh.position.z = 0; // z is always locked to ground level (0)
                 this.updateObjectPosition();
                 let objectIndexByTrackId = this.annotationObjects.getObjectIndexByName(this.selectedMesh.name);
                 this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, objectIndexByTrackId, true);
@@ -1349,6 +1353,7 @@ class LabelTool3D {
         this.dragControls = true;
         // update 2d bounding box
         if (this.selectedMesh !== undefined) {
+            this.selectedMesh.position.z = 0; // z is always locked to ground level (0)
             this.updateObjectPosition();
             let objectIndexByTrackId = this.annotationObjects.getObjectIndexByName(this.selectedMesh.name);
             this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, objectIndexByTrackId, true);
@@ -1448,8 +1453,11 @@ class LabelTool3D {
         this.annotationObjects.remove(labelIndex, fileIndex);
         this.folderBoundingBox3DArray.splice(labelIndex, 1);
         this.folderPositionArray.splice(labelIndex, 1);
+        this.positionControllersArray.splice(labelIndex, 1);
         this.folderRotationArray.splice(labelIndex, 1);
+        this.rotationControllersArray.splice(labelIndex, 1);
         this.folderSizeArray.splice(labelIndex, 1);
+        this.sizeControllersArray.splice(labelIndex, 1);
         this.folderAttributeArray.splice(labelIndex, 1);
         this.controllerGUIArray.splice(labelIndex, 1);
         this.annotationObjects.selectEmpty();
@@ -1560,6 +1568,7 @@ class LabelTool3D {
         let cubeZ = folderPosition.add(bbox, 'z').name("z").min(minZPos).max(maxZPos).step(0.01).listen();
         folderPosition.close();
         this.folderPositionArray.push(folderPosition);
+        this.positionControllersArray[folderInsertIdx] = { x: cubeX, y: cubeY, z: cubeZ };
 
         let folderRotation = bboxFolders.__folders['Rotation'] ?? bboxFolders.addFolder('Rotation');
         let cubeYaw = folderRotation.add(bbox, 'rotationYaw').name("rotationYaw").min(-Math.PI).max(Math.PI).step(0.01).listen();
@@ -1568,6 +1577,7 @@ class LabelTool3D {
 
         folderRotation.close();
         this.folderRotationArray.push(folderRotation);
+        this.rotationControllersArray[folderInsertIdx] = { yaw: cubeYaw, pitch: cubePitch, roll: cubeRoll };
 
         let folderSize = bboxFolders.__folders['Size'] ?? bboxFolders.addFolder('Size');
         let cubeLength = folderSize.add(bbox, 'length').name("length").min(0.3).max(20).step(0.01).listen();
@@ -1575,6 +1585,7 @@ class LabelTool3D {
         let cubeHeight = folderSize.add(bbox, 'height').name("height").min(0.3).max(5).step(0.01).listen();
         folderSize.close();
         this.folderSizeArray.push(folderSize);
+        this.sizeControllersArray[folderInsertIdx] = { length: cubeLength, width: cubeWidth, height: cubeHeight };
 
         let objectClassIdx = this.annotationClasses.getIndexByObjectClass(bbox.class);
         if (objectClassIdx !== -1 && this.labelTool.config.datasets[this.labelTool.datasetArray.indexOf(this.labelTool.currentDataset)].classes[objectClassIdx]["attributes"] !== undefined) {
@@ -1621,18 +1632,18 @@ class LabelTool3D {
         });
 
         cubeZ.onChange((value: number) => {
-            if (value >= minZPos && value < maxZPos) {
-                // let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
-                let selectionIndex = this.annotationObjects.getSelectionIndex();
-                if (selectionIndex !== -1) {
-                    this.labelTool.cubeArray[this.labelTool.currentFrameIndex][selectionIndex].position.z = value;
-                    this.annotationObjects.contents[this.labelTool.currentFrameIndex][selectionIndex]["z"] = value;
-                    // update bounding box
-                    this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, selectionIndex, true);
-                }
-                else {
-                    console.log("Could not find object with track ID " + bbox.trackId + " and class " + bbox.class);
-                }
+            // z is always locked to ground level (0); ignore whatever value was entered/dragged
+            let selectionIndex = this.annotationObjects.getSelectionIndex();
+            if (selectionIndex !== -1) {
+                this.labelTool.cubeArray[this.labelTool.currentFrameIndex][selectionIndex].position.z = 0;
+                this.annotationObjects.contents[this.labelTool.currentFrameIndex][selectionIndex]["z"] = 0;
+                bbox.z = 0;
+                cubeZ.updateDisplay();
+                // update bounding box
+                this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, selectionIndex, true);
+            }
+            else {
+                console.log("Could not find object with track ID " + bbox.trackId + " and class " + bbox.class);
             }
         });
 
@@ -1766,9 +1777,9 @@ class LabelTool3D {
                     if (objectIndex === -1) {
                         continue;
                     }
-                    const newZPos = this.labelTool.cubeArray[frameIndex][objectIndex].position.z + (value - this.labelTool.cubeArray[frameIndex][objectIndex].scale.z) / 2;
+                    // box is base-anchored at z=0, so height changes no longer need to reposition z
                     this.labelTool.cubeArray[frameIndex][objectIndex].scale.z = value;
-                    this.labelTool.cubeArray[frameIndex][objectIndex].position.z = newZPos;
+                    this.labelTool.cubeArray[frameIndex][objectIndex].position.z = 0;
                     this.annotationObjects.contents[frameIndex][objectIndex]["height"] = value;
                 }
             } else {
@@ -1828,12 +1839,13 @@ class LabelTool3D {
                     }
                 });
                 cubeEndZ.onChange((value) => {
-                    if (value >= minZPos && value < maxZPos) {
-                        this.labelTool.cubeArray[newFileIndex][this.interpolationObjIndexNextFile].position.z = value;
-                        this.annotationObjects.contents[newFileIndex][this.interpolationObjIndexNextFile]["interpolationEnd"]["position"]["z"] = value;
-                        this.annotationObjects.contents[newFileIndex][this.interpolationObjIndexNextFile]["z"] = value;
-                        this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, this.interpolationObjIndexCurrentFile, true);
-                    }
+                    // z is always locked to ground level (0); ignore whatever value was entered/dragged
+                    this.labelTool.cubeArray[newFileIndex][this.interpolationObjIndexNextFile].position.z = 0;
+                    this.annotationObjects.contents[newFileIndex][this.interpolationObjIndexNextFile]["interpolationEnd"]["position"]["z"] = 0;
+                    this.annotationObjects.contents[newFileIndex][this.interpolationObjIndexNextFile]["z"] = 0;
+                    bboxEndParams.z = 0;
+                    cubeEndZ.updateDisplay();
+                    this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, this.interpolationObjIndexCurrentFile, true);
                 });
                 cubeEndYaw.onChange((value) => {
                     this.labelTool.cubeArray[newFileIndex][this.interpolationObjIndexNextFile].rotation.z = value;
@@ -1892,8 +1904,8 @@ class LabelTool3D {
                     this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, this.interpolationObjIndexCurrentFile, true);
                 });
                 cubeEndHeight.onChange((value) => {
-                    let newZPos = this.labelTool.cubeArray[newFileIndex][this.interpolationObjIndexNextFile].position.z + (value - this.labelTool.cubeArray[newFileIndex][this.interpolationObjIndexNextFile].scale.z) / 2;
-                    this.labelTool.cubeArray[newFileIndex][this.interpolationObjIndexNextFile].position.z = newZPos;
+                    // box is base-anchored at z=0, so height changes no longer need to reposition z
+                    this.labelTool.cubeArray[newFileIndex][this.interpolationObjIndexNextFile].position.z = 0;
                     this.labelTool.cubeArray[newFileIndex][this.interpolationObjIndexNextFile].scale.z = value;
                     this.annotationObjects.contents[newFileIndex][this.interpolationObjIndexNextFile]["interpolationEnd"]["size"]["height"] = value;
                     this.annotationObjects.contents[newFileIndex][this.interpolationObjIndexNextFile]["height"] = value;
@@ -2008,6 +2020,11 @@ class LabelTool3D {
             this.annotationObjects.contents[frameIndex][selectionIndex]["y"] = newYPos;
             this.labelTool.cubeArray[frameIndex][selectionIndex].scale.y = value;
             this.annotationObjects.contents[frameIndex][selectionIndex]["width"] = value;
+            const positionControllers = this.positionControllersArray[selectionIndex];
+            if (positionControllers) {
+                positionControllers.x.setValue(newXPos);
+                positionControllers.y.setValue(newYPos);
+            }
         } else {
             console.log("Could not found object with track ID " + bbox.trackId + " and class " + bbox.class);
         }
@@ -2026,6 +2043,11 @@ class LabelTool3D {
             this.annotationObjects.contents[frameIndex][selectionIndex]["y"] = newYPos;
             this.labelTool.cubeArray[frameIndex][selectionIndex].scale.x = value;
             this.annotationObjects.contents[frameIndex][selectionIndex]["length"] = value;
+            const positionControllers = this.positionControllersArray[selectionIndex];
+            if (positionControllers) {
+                positionControllers.x.setValue(newXPos);
+                positionControllers.y.setValue(newYPos);
+            }
         } else {
             console.log("Could not found object with track ID " + bbox.trackId + " and class " + bbox.class);
         }
@@ -2035,9 +2057,9 @@ class LabelTool3D {
         // let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, i);
         let selectionIndex = this.annotationObjects.getSelectionIndex();
         if (selectionIndex !== -1) {
-            const newZPos = this.labelTool.cubeArray[i][selectionIndex].position.z + (value - this.labelTool.cubeArray[i][selectionIndex].scale.z) / 2;
+            // box is base-anchored at z=0, so height changes no longer need to reposition z
             this.labelTool.cubeArray[i][selectionIndex].scale.z = value;
-            this.labelTool.cubeArray[i][selectionIndex].position.z = newZPos;
+            this.labelTool.cubeArray[i][selectionIndex].position.z = 0;
             this.annotationObjects.contents[i][selectionIndex]["height"] = value;
         } else {
             console.log("Could not found object with track ID " + bbox.trackId + " and class " + bbox.class);
@@ -2588,6 +2610,11 @@ class LabelTool3D {
     get3DLabel(insertIndex: number, parameters: AnnotationObjectParams): AnnotationObjectParams {
         const bbox = parameters;
         const cubeGeometry = new BoxBufferGeometry(1.0, 1.0, 1.0);//width, length, height
+        // Shift geometry up by half its unit depth so the box base sits at local z=0
+        // instead of being centered on z=0. Combined with position.z locked to 0,
+        // this makes the box span world z=0 (ground/bottom) to z=height (top),
+        // instead of z=-height/2 to z=+height/2.
+        cubeGeometry.translate(0, 0, 0.5);
         let color;
         if (parameters.fromFile === true) {
             color = this.annotationClasses.annotationClasses[parameters.class].color;
@@ -2615,6 +2642,8 @@ class LabelTool3D {
         // TODO: check if Mesh can take an array of materials
         const cubeMesh = new Mesh(cubeGeometry, cubeMaterials);
         cubeMesh.position.copy(this.annotationObjects.position(bbox));
+        cubeMesh.position.z = 0; // z is always locked to ground level (0)
+        bbox.z = 0;
         cubeMesh.scale.copy(this.annotationObjects.scale(bbox));
         cubeMesh.rotation.copy(this.annotationObjects.rotation(bbox));
         if (!parameters.trackId) {
@@ -2766,6 +2795,7 @@ class LabelTool3D {
         const position: Vector3 = this.annotationObjects.position(box);
         const rotation: Euler = this.annotationObjects.rotation(box);
         this.growBox(scale, position, rotation, box.fileIndex, change_scale);
+        position.z = 0; // z is always locked to ground level (0)
         this.annotationObjects.setPosition(position, box);
         this.annotationObjects.setRotation(rotation, box);
         this.annotationObjects.setScale(scale, box);
@@ -2975,7 +3005,10 @@ class LabelTool3D {
 
         // adjust size and pos
         ['x', 'y', 'z'].forEach((axis) => {
-            pos[axis] += (refined_extreme.max[axis] + refined_extreme.min[axis]) / 2;
+            if (axis !== 'z') {
+                pos[axis] += (refined_extreme.max[axis] + refined_extreme.min[axis]) / 2;
+            }
+            // z is always locked to ground level (0); only its scale (height) may grow
             if (change_scale) {
                 scale[axis] += refined_extreme.max[axis] - refined_extreme.min[axis];
             }
@@ -3059,7 +3092,8 @@ class LabelTool3D {
 
         MathUtils.translateBox(box, 'x', (extreme.max.x + extreme.min.x) / 2)
         MathUtils.translateBox(box, 'y', (extreme.max.y + extreme.min.y) / 2)
-        MathUtils.translateBox(box, 'z', (extreme.max.z + extreme.min.z) / 2)
+        // z is always locked to ground level (0); do not translate it based on point-cloud fit
+        box.z = 0;
 
         if (change_scale) {
             box.length = extreme.max.x - extreme.min.x;
@@ -3506,7 +3540,7 @@ class LabelTool3D {
             const delta = 0.05;
             this.selectedMesh.position.y += delta * (Number(Key.isDown(KEYS.CODE_W)) - Number(Key.isDown(KEYS.CODE_S)));
             this.selectedMesh.position.x += delta * (Number(Key.isDown(KEYS.CODE_D)) - Number(Key.isDown(KEYS.CODE_A)));
-            this.selectedMesh.position.z += delta * (Number(Key.isDown(KEYS.CODE_E)) - Number(Key.isDown(KEYS.CODE_Q)));
+            // z is always locked to ground level (0); E/Q no longer move the box vertically
         }
         this.updateObjectPosition();
     }
@@ -3542,6 +3576,7 @@ class LabelTool3D {
         if (!this.selectedMesh) {
             return;
         }
+        this.selectedMesh.position.z = 0; // z is always locked to ground level (0)
         const objectIdx = this.annotationObjects.getObjectIndexByName(this.selectedMesh.name)!;
         this.annotationObjects.contents[this.labelTool.currentFrameIndex][objectIdx]["x"] = this.selectedMesh.position.x;
         this.annotationObjects.contents[this.labelTool.currentFrameIndex][objectIdx]["y"] = this.selectedMesh.position.y;
@@ -3562,6 +3597,32 @@ class LabelTool3D {
         this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx]["rotationYaw"] = this.selectedMesh.rotation.z;
         this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx]["rotationPitch"] = this.selectedMesh.rotation.x;
         this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx]["rotationRoll"] = this.selectedMesh.rotation.y;
+
+        // Write through the actual dat.gui controllers (not just annotationObjects.contents),
+        // using setValue() rather than updateDisplay(). For boxes loaded from existing annotation
+        // files, the GUI's bound object is not always the same object reference as
+        // annotationObjects.contents[...], so writing only to contents left the panel stuck showing
+        // the originally-loaded value. setValue() writes into whatever object the controller is
+        // actually bound to (via controller.object/controller.property) and refreshes the display,
+        // so it's correct regardless of that reference identity.
+        const positionControllers = this.positionControllersArray[objectIdx];
+        if (positionControllers) {
+            positionControllers.x.setValue(this.selectedMesh.position.x);
+            positionControllers.y.setValue(this.selectedMesh.position.y);
+            positionControllers.z.setValue(this.selectedMesh.position.z);
+        }
+        const rotationControllers = this.rotationControllersArray[objectIdx];
+        if (rotationControllers) {
+            rotationControllers.yaw.setValue(this.selectedMesh.rotation.z);
+            rotationControllers.pitch.setValue(this.selectedMesh.rotation.x);
+            rotationControllers.roll.setValue(this.selectedMesh.rotation.y);
+        }
+        const sizeControllers = this.sizeControllersArray[objectIdx];
+        if (sizeControllers) {
+            sizeControllers.length.setValue(this.selectedMesh.scale.x);
+            sizeControllers.width.setValue(this.selectedMesh.scale.y);
+            sizeControllers.height.setValue(this.selectedMesh.scale.z);
+        }
 
         if (this.interpolationMode === true && this.labelTool.frameAnnotationType === "continuous_sequence") {
             // let selectionIndex = this.annotationObjects.getSelectionIndex();

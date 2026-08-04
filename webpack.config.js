@@ -19,6 +19,8 @@ module.exports = {
         proxy: [
             {
                 context: [
+                    '/project_bounding_box',
+                    '/project_points',
                     '/predict_rotation',
                     '/save_annotations',
                     '/connect-to-workstation',

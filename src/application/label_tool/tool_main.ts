@@ -335,7 +335,12 @@ class LabelTool {
         this.setCanvasSize();
 
         for (let i = 0; i < this.cameraChannels.length; i++){
+            console.log("this.canvasSize: ", this.canvasSize);
+            console.log("this.originalImageSize: ", this.originalImageSize);
+
             this.imageScale[i] *= this.canvasSize[0] / this.originalImageSize[0];
+            console.log("this.imageScale: ", this.imageScale);
+            
             this.currentImageArray[i] = {
                 x: 0,
                 y: 0,
@@ -476,7 +481,13 @@ class LabelTool {
 
 
     setCanvasSize() {
-        this.canvasSize[0] = window.innerWidth / this.cameraChannels.length;
+        if (this.cameraChannels.length < 4) {
+            this.canvasSize[0] = window.innerWidth / 4;
+        }
+        else 
+        {
+            this.canvasSize[0] = window.innerWidth / this.cameraChannels.length;
+        }
         this.canvasSize[1] = this.canvasSize[0] / this.imageAspectRatio;
     }
 
@@ -710,9 +721,16 @@ class LabelTool {
         }
         else {
             // create gui elements
+            // Bind directly to the live content object (annotationObjects.contents[newFileIndex][i]),
+            // not a detached copy. Previously this used getDefaultObject() + setBBox() to build a
+            // fresh, unrelated object populated with a snapshot of the current values; dat.gui's
+            // fields were then permanently bound to that snapshot. Position/rotation/scale updates
+            // from dragging in the 3D view are written into annotationObjects.contents (see
+            // updateObjectPosition() in tool_3d.ts), which the detached snapshot never saw again -
+            // so the panel looked frozen for any box on a frame that had already been visited/loaded,
+            // while newly-created boxes (whose GUI is bound to the live object from the start) worked.
             for (let i = 0; i < this.annotationObjects.contents[newFileIndex].length; i++) {
-                let bboxDefault = this.annotationObjects.getDefaultObject();
-                let bbox = this.annotationObjects.setBBox(bboxDefault, newFileIndex, i);
+                let bbox = this.annotationObjects.contents[newFileIndex][i];
                 this.labelTool3D.addBoundingBoxGui(bbox, undefined, i);
             }
         }
@@ -855,8 +873,11 @@ class LabelTool {
     private emptyAllFolders() {
         this.labelTool3D.folderBoundingBox3DArray = [];
         this.labelTool3D.folderPositionArray = [];
+        this.labelTool3D.positionControllersArray = [];
         this.labelTool3D.folderRotationArray = [];
+        this.labelTool3D.rotationControllersArray = [];
         this.labelTool3D.folderSizeArray = [];
+        this.labelTool3D.sizeControllersArray = [];
         this.labelTool3D.folderAttributeArray = [];
         this.labelTool3D.controllerGUIArray = [];
     }
