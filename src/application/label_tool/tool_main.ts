@@ -585,6 +585,15 @@ class LabelTool {
 
     changeFrame(newFileIndex: number, undo: boolean = false) {
 
+        // Persist the frame we're leaving before switching away from it. saveAnnotations()
+        // now only writes the current frame (not the whole sequence) on each autosave tick,
+        // so without this, edits made right before navigating to a different frame could be
+        // lost if the next autosave tick fires after currentFrameIndex has already changed.
+        // Fire-and-forget: the synchronous part of saveAnnotations() captures the (still-current,
+        // soon-to-be-outgoing) frame index before this function's first `await`, so it targets
+        // the right frame even though we don't wait for the request to finish here.
+        this.labelTool3D.saveAnnotations();
+
         if (!undo) {
             this.labelTool3D.operationStack.push({
                 type: 'changeFrame',

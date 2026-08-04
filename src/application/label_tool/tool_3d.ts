@@ -207,7 +207,7 @@ class LabelTool3D {
 
     // Time and Animation
     prevTime: number = performance.now();
-    autoSaveInterval: number = 2000;
+    autoSaveInterval: number = 5000;
 
     interpolationObjIndexCurrentFile: number = -1;
     interpolationObjIndexNextFile: number = -1;
@@ -2077,9 +2077,16 @@ class LabelTool3D {
     }
 
     saveAnnotations = async () => {
+        // Only save the current frame's annotation file, not the whole sequence.
+        // createAnnotationFiles() still builds content for every frame (it returns an array
+        // indexed the same way as annotationFileNames), but we slice down to just the frame
+        // the user is actually working on before sending it over the wire, so the backend only
+        // ever writes one file per autosave tick instead of rewriting the entire sequence.
+        const currentFrameIndex = this.labelTool.currentFrameIndex;
+        const allAnnotationFiles = getLoader(this.labelTool).createAnnotationFiles(this.labelTool);
         const annotationFiles = {
-            annotationFiles: getLoader(this.labelTool).createAnnotationFiles(this.labelTool),
-            fileNames: this.labelTool.annotationFileNames,
+            annotationFiles: [allAnnotationFiles[currentFrameIndex]],
+            fileNames: [this.labelTool.annotationFileNames[currentFrameIndex]],
             dataset: this.labelTool.currentDataset,
             lidarChannel: this.labelTool.currentLidarChannel,
             sequence: this.labelTool.currentSequence

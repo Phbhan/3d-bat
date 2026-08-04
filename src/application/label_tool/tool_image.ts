@@ -178,7 +178,7 @@ class LabelToolImage{
             throw new Error('Projection request failed: ' + response.status);
         }
         const result: { [channel: string]: number[][] } = await response.json();
-        console.log("result: ", result);
+        // console.log("result: ", result);
         
         const converted: { [channel: string]: Vector2[] } = {};
         for (const channel in result) {
@@ -205,7 +205,6 @@ class LabelToolImage{
         } else {
             color = this.annotationClasses.annotationClasses[className].color;
         }
-        console.log("channelObj: ", channelObj);
 
         // bottom four lines
         lineArray.push(this.drawLine(channelIdx, channelObj.projectedPoints[0], channelObj.projectedPoints[1], color)!);
