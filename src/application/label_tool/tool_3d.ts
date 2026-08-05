@@ -43,6 +43,7 @@ import {
     Camera,
     Clock,
     Color,
+    ConeBufferGeometry,
     DirectionalLight,
     DoubleSide,
     EdgesGeometry,
@@ -665,6 +666,11 @@ class LabelTool3D {
                         } else {
                             mesh.material.opacity = 0;
                         }
+                        let arrow0 = <Mesh>mesh.getObjectByName("direction-arrow");
+                        if (arrow0) {
+                            (<MeshBasicMaterial>arrow0.material).transparent = true;
+                            (<MeshBasicMaterial>arrow0.material).opacity = 0;
+                        }
                         // remove all 2D labels
                         for (let j = 0; j < this.annotationObjects.contents[this.labelTool.currentFrameIndex][i].channels.length; j++) {
                             let channelObj = this.annotationObjects.contents[this.labelTool.currentFrameIndex][i].channels[j];
@@ -698,6 +704,10 @@ class LabelTool3D {
                             }
                         } else {
                             mesh.material.opacity = 0.9;
+                        }
+                        let arrow1 = <Mesh>mesh.getObjectByName("direction-arrow");
+                        if (arrow1) {
+                            (<MeshBasicMaterial>arrow1.material).opacity = 1;
                         }
                         // show 2D labels
                         if (selectionIndex === i) {
@@ -1204,7 +1214,7 @@ class LabelTool3D {
                 }
             }
             ];
-        
+
         $("#canvasBev").css("height", viewHeight);
         $("#canvasBev").css("top", this.labelToolImage.canvasArray[0].scrollHeight);
         $("#canvasSideView").css("height", viewHeight);
@@ -2816,6 +2826,21 @@ class LabelTool3D {
         let edgesMaterial = new LineBasicMaterial({color: boundingBoxColor, linewidth: 2});
         let edges = new LineSegments(edgesGeometry, edgesMaterial);
         cubeMesh.add(edges);
+
+        // Direction arrow: cone on the front face showing which way the box points.
+        // "length" (scale.x) is the forward axis (see cubeLength.onChange), so the
+        // arrow sits at local x=0.5 (front face) and is rotated to point along +x.
+        // Local position scales with the parent automatically, so it stays glued to
+        // the front face as length/width/height change; the counter-scale below only
+        // keeps the cone's *shape* from stretching, using the scale at creation time.
+        const arrowGeometry = new ConeBufferGeometry(0.15, 0.8, 8);
+        arrowGeometry.rotateZ(-Math.PI / 2);
+        const arrowMaterial = new MeshBasicMaterial({color: 0xffff00});
+        const directionArrow = new Mesh(arrowGeometry, arrowMaterial);
+        directionArrow.name = "direction-arrow";
+        directionArrow.position.set(0.7, 0, 0.5);
+        directionArrow.scale.set(1 / cubeMesh.scale.x, 1 / cubeMesh.scale.y, 1 / cubeMesh.scale.z);
+        cubeMesh.add(directionArrow);
 
         // add object only to scene if file index is equal to current file index
         if (parameters.fileIndex === this.labelTool.currentFrameIndex) {
