@@ -535,18 +535,18 @@ class LabelTool3D {
             // update height and top position of helper views
             let imagePanelHeight = parseInt($("#layout_layout_resizer_top").css("top"), 10);
             let newHeight = Math.round((window.innerHeight - this.labelToolImage.headerHeight - imagePanelHeight) / 3.0);
-            $("#canvasSideView").css("height", newHeight);
-            $("#canvasSideView").css("top", this.labelToolImage.headerHeight + imagePanelHeight);
+            $("#canvasBev").css("height", newHeight);
+            $("#canvasBev").css("top", this.labelToolImage.headerHeight + imagePanelHeight );
             this.views[1].height = newHeight;
-            this.views[1].top = 0;
-            $("#canvasFrontView").css("height", newHeight);
-            $("#canvasFrontView").css("top", this.labelToolImage.headerHeight + imagePanelHeight + newHeight);
+            this.views[1].top = 2 * newHeight;
+            $("#canvasSideView").css("height", newHeight);
+            $("#canvasSideView").css("top", this.labelToolImage.headerHeight + imagePanelHeight+ newHeight);
             this.views[2].height = newHeight;
             this.views[2].top = newHeight;
-            $("#canvasBev").css("height", newHeight);
-            $("#canvasBev").css("top", this.labelToolImage.headerHeight + imagePanelHeight + 2 * newHeight);
+            $("#canvasFrontView").css("height", newHeight);
+            $("#canvasFrontView").css("top", this.labelToolImage.headerHeight + imagePanelHeight + 2 * newHeight);
             this.views[3].height = newHeight;
-            this.views[3].top = 2 * newHeight;
+            this.views[3].top = 0;
 
             (<PerspectiveCamera>this.currentCamera).aspect = window.innerWidth / window.innerHeight;
             this.currentCamera.updateProjectionMatrix();
@@ -1043,6 +1043,43 @@ class LabelTool3D {
         this.render();
     }
 
+    // For the side/front/bev helper views: hide every annotation box except the
+    // selected one, and render the selected box at low opacity so it doesn't
+    // obscure the point cloud underneath it. Returns a function that restores
+    // every box's original visibility/opacity so the main view (rendered earlier
+    // in the same frame) and next frame are unaffected.
+    isolateSelectedBoxForHelperViews(selectedMesh: Mesh): () => void {
+        const helperViewSelectedOpacity = 0.35;
+        const frame = this.labelTool.cubeArray?.[this.labelTool.currentFrameIndex];
+        if (!frame || frame.length === 0) {
+            return () => {};
+        }
+
+        const restoreOps: (() => void)[] = [];
+
+        for (let mesh of frame) {
+            if (!mesh) {
+                continue;
+            }
+            const wasVisible = mesh.visible;
+            if (mesh === selectedMesh) {
+                const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+                const originalOpacities = materials.map((m: any) => m.opacity);
+                materials.forEach((m: any) => { m.opacity = helperViewSelectedOpacity; });
+                mesh.visible = true;
+                restoreOps.push(() => {
+                    materials.forEach((m: any, idx: number) => { m.opacity = originalOpacities[idx]; });
+                    mesh.visible = wasVisible;
+                });
+            } else {
+                mesh.visible = false;
+                restoreOps.push(() => { mesh.visible = wasVisible; });
+            }
+        }
+
+        return () => restoreOps.forEach(restore => restore());
+    }
+
     hideMasterViews() {
         $("#canvasSideView").hide();
         $("#canvasFrontView").hide();
@@ -1062,18 +1099,20 @@ class LabelTool3D {
         this.renderer.render(this.scene, this.currentCamera);
 
         if (this.selectedMesh !== undefined) {
+            let restoreBoxState = this.isolateSelectedBoxForHelperViews(this.selectedMesh);
+
             for (let i = 1; i < this.views.length; i++) {
                 let view = this.views[i];
                 let camera = view.camera;
-                view.updateCamera(camera, this.scene, this.selectedMesh.position);
+                view.updateCamera(camera, this.scene, this.selectedMesh);
                 this.renderer.setViewport(view.left, view.top, view.width, view.height);
                 this.renderer.setScissor(view.left, view.top, view.width, view.height);
                 this.renderer.setScissorTest(true);
                 this.renderer.setClearColor(view.background);
-                camera.aspect = view.width / view.height;
-                camera.updateProjectionMatrix();
                 this.renderer.render(this.scene, camera);
             }
+
+            restoreBoxState();
         }
 
         if (this.labelTool.cubeArray !== undefined && this.labelTool.cubeArray.length > 0 && this.labelTool.cubeArray[this.labelTool.currentFrameIndex] !== undefined && this.labelTool.cubeArray[this.labelTool.currentFrameIndex].length > 0
@@ -1110,36 +1149,6 @@ class LabelTool3D {
                 up: [0, 1, 0],
                 fov: 70
             },
-            // side view
-            {
-                name: "side",
-                left: 0,
-                top: 0,
-                width: window.innerWidth / 3,
-                height: viewHeight,
-                background: new THREE.Color(22 / 256.0, 22 / 256.0, 22 / 256.0),
-                up: [-1, 0, 0],
-                fov: 70,
-                updateCamera: function (camera, scene, objectPosition) {
-                    camera.position.set(objectPosition.x + 10, objectPosition.y, objectPosition.z);
-                    camera.lookAt(objectPosition);
-                }
-            },
-            // front view
-            {
-                name: "front",
-                left: 0,
-                top: viewHeight,
-                width: window.innerWidth / 3,
-                height: viewHeight,
-                background: new THREE.Color(22 / 256.0, 22 / 256.0, 22 / 256.0),
-                up: [0, -1, 0],
-                fov: 70,
-                updateCamera: function (camera, scene, objectPosition) {
-                    camera.position.set(objectPosition.x, objectPosition.y + 10, objectPosition.z);
-                    camera.lookAt(objectPosition);
-                }
-            },
             // bev view
             {
                 name: "bev",
@@ -1150,19 +1159,58 @@ class LabelTool3D {
                 background: new THREE.Color(22 / 256.0, 22 / 256.0, 22 / 256.0),
                 up: [0, 0, 0],
                 fov: 70,
-                updateCamera: function (camera, scene, objectPosition) {
-                    camera.position.set(objectPosition.x, objectPosition.y, objectPosition.z + 10);
-                    camera.lookAt(objectPosition);
+                zoom: 1,
+                updateCamera: function (camera, scene, selectedMesh) {
+                    let center = LabelTool3D.getObjectCenter(selectedMesh);
+                    camera.position.set(center.x, center.y, center.z + 10);
+                    camera.lookAt(center);
+                    LabelTool3D.fitOrthoCameraToObject(camera, selectedMesh, this);
+                }
+            },
+            // side view
+            {
+                name: "side",
+                left: 0,
+                top: viewHeight,
+                width: window.innerWidth / 3,
+                height: viewHeight,
+                background: new THREE.Color(22 / 256.0, 22 / 256.0, 22 / 256.0),
+                up: [-1, 0, 0],
+                fov: 70,
+                zoom: 1,
+                updateCamera: function (camera, scene, selectedMesh) {
+                    let center = LabelTool3D.getObjectCenter(selectedMesh);
+                    camera.position.set(center.x + 10, center.y, center.z);
+                    camera.lookAt(center);
+                    LabelTool3D.fitOrthoCameraToObject(camera, selectedMesh, this);
+                }
+            },
+            // front view
+            {
+                name: "front",
+                left: 0,
+                top: 0,
+                width: window.innerWidth / 3,
+                height: viewHeight,
+                background: new THREE.Color(22 / 256.0, 22 / 256.0, 22 / 256.0),
+                up: [0, -1, 0],
+                fov: 70,
+                zoom: 1,
+                updateCamera: function (camera, scene, selectedMesh) {
+                    let center = LabelTool3D.getObjectCenter(selectedMesh);
+                    camera.position.set(center.x, center.y + 10, center.z);
+                    camera.lookAt(center);
+                    LabelTool3D.fitOrthoCameraToObject(camera, selectedMesh, this);
                 }
             }
             ];
-
-        $("#canvasSideView").css("height", viewHeight);
-        $("#canvasSideView").css("top", this.labelToolImage.canvasArray[0].scrollHeight);
-        $("#canvasFrontView").css("height", viewHeight);
-        $("#canvasFrontView").css("top", this.labelToolImage.canvasArray[0].scrollHeight + viewHeight);
+        
         $("#canvasBev").css("height", viewHeight);
-        $("#canvasBev").css("top", this.labelToolImage.canvasArray[0].scrollHeight + 2 * viewHeight);
+        $("#canvasBev").css("top", this.labelToolImage.canvasArray[0].scrollHeight);
+        $("#canvasSideView").css("height", viewHeight);
+        $("#canvasSideView").css("top", this.labelToolImage.canvasArray[0].scrollHeight + viewHeight);
+        $("#canvasFrontView").css("height", viewHeight);
+        $("#canvasFrontView").css("top", this.labelToolImage.canvasArray[0].scrollHeight + 2 * viewHeight);
 
         let mainView = this.views[0];
         let mainCamera = new PerspectiveCamera(70, window.innerWidth / window.innerHeight, 1, 3000);
@@ -1172,17 +1220,80 @@ class LabelTool3D {
 
         for (let i = 1; i < this.views.length; i++) {
             let view = this.views[i];
-            let top = 4;
-            let bottom = -4;
-            let aspectRatio = view.width / view.height;
-            let left = bottom * aspectRatio;
-            let right = top * aspectRatio;
-            let camera = new THREE.OrthographicCamera(left, right, top, bottom, 0.001, 2000);
+            // Placeholder frustum - actual bounds are recomputed every frame in
+            // fitOrthoCameraToObject() based on the selected object's size, so the
+            // helper views stay framed on the selected object instead of a fixed
+            // window that spans far more than the object itself.
+            let camera = new THREE.OrthographicCamera(-4, 4, 4, -4, 0.001, 2000);
             camera.position.set(0, 0, 0);//default
             camera.up.fromArray(view.up);
             view.camera = camera;
         }
 
+    }
+
+    // Returns the world-space center of an annotation box mesh. The box geometry is
+    // a unit cube translated so it spans local z in [0, 1], and position.z is locked
+    // to the ground (0), so the world center sits half the box height above position.
+    static getObjectCenter(mesh: Mesh): Vector3 {
+        return new Vector3(
+            mesh.position.x,
+            mesh.position.y,
+            mesh.position.z + mesh.scale.z / 2
+        );
+    }
+
+    // Sizes an orthographic helper-view camera's frustum so it stays centered on the
+    // selected object, padded by a margin, instead of using a fixed window that can
+    // leave a small object looking lost in empty space or clip a large one.
+    // `view.zoom` (adjusted by the mouse wheel, see attachHelperViewZoomHandlers)
+    // lets the user zoom each helper view in and out independently of the main view.
+    static fitOrthoCameraToObject(camera: OrthographicCamera, mesh: Mesh, view: any) {
+        const padding = 1.6; // fraction of extra room to leave around the object
+        const zoom = (view.zoom && view.zoom > 0) ? view.zoom : 1;
+        const halfExtent = (Math.max(mesh.scale.x, mesh.scale.y, mesh.scale.z) / 2) * padding / zoom;
+        const aspectRatio = view.width / view.height;
+
+        const top = halfExtent;
+        const bottom = -halfExtent;
+        const right = halfExtent * aspectRatio;
+        const left = -halfExtent * aspectRatio;
+
+        if (camera.top !== top || camera.bottom !== bottom || camera.left !== left || camera.right !== right) {
+            camera.top = top;
+            camera.bottom = bottom;
+            camera.left = left;
+            camera.right = right;
+            camera.updateProjectionMatrix();
+        }
+    }
+
+    // Lets the user scroll to zoom each helper view independently, since they are
+    // separate DOM overlays and don't share the main view's OrbitControls wheel zoom.
+    attachHelperViewZoomHandlers() {
+        const zoomStep = 0.1;
+        const minZoom = 0.25;
+        const maxZoom = 4;
+
+        const bindZoom = (elementId: string, viewIndex: number) => {
+            const element = document.getElementById(elementId);
+            if (!element || (element as any).__zoomBound) {
+                return;
+            }
+            (element as any).__zoomBound = true;
+            element.addEventListener("wheel", (e: WheelEvent) => {
+                e.preventDefault();
+                let view = this.views[viewIndex];
+                if (!view) {
+                    return;
+                }
+                let direction = e.deltaY < 0 ? 1 : -1;
+                view.zoom = Math.min(maxZoom, Math.max(minZoom, view.zoom + direction * zoomStep));
+            }, { passive: false });
+        };
+        bindZoom("canvasBev", 1);
+        bindZoom("canvasSideView", 2);
+        bindZoom("canvasFrontView", 3);
     }
 
     initBev() {
@@ -1197,7 +1308,7 @@ class LabelTool3D {
 
         $("body").append(this.canvasBEV);
         $("#canvasBev").css({
-            top: this.labelToolImage.canvasArray[0].scrollHeight + 2 * heightBev +'px',
+            top: this.labelToolImage.canvasArray[0].scrollHeight +'px',
             position: "absolute"
         });
 
@@ -1240,7 +1351,7 @@ class LabelTool3D {
 
         $("body").append(this.canvasFrontView);
         $("#canvasFrontView").css({
-            top: this.labelToolImage.canvasArray[0].scrollHeight + heightFrontView + "px",
+            top: this.labelToolImage.canvasArray[0].scrollHeight + 2 * heightFrontView + "px",
             position: "absolute"
         });
 
@@ -1279,7 +1390,7 @@ class LabelTool3D {
 
         $("body").append(this.canvasSideView);
         $("#canvasSideView").css({
-            top: this.labelToolImage.canvasArray[0].scrollHeight + 'px',
+            top: this.labelToolImage.canvasArray[0].scrollHeight + heightSideView + 'px',
             position: 'absolute'});
 
         this.cameraSideView = new OrthographicCamera(
@@ -1311,6 +1422,9 @@ class LabelTool3D {
         this.showBEV(xPos, yPos, zPos);//width along x-axis (lateral), height along y axis (longitudinal)
         // move class picker to right
         $("#class-picker").css("left", window.innerWidth / 3 + 10);
+        // the canvasSideView/canvasFrontView/canvasBev elements are created lazily
+        // above, so wire up their scroll-to-zoom handlers now that they exist
+        this.attachHelperViewZoomHandlers();
     }
 
     setView(value: ViewModeOption) {
@@ -1617,8 +1731,8 @@ class LabelTool3D {
 
         let folderSize = bboxFolders.__folders['Size'] ?? bboxFolders.addFolder('Size');
         let cubeLength = folderSize.add(bbox, 'length').name("length").min(0.3).max(20).step(0.01).listen();
-        let cubeWidth = folderSize.add(bbox, 'width').name("width").min(0.3).max(5).step(0.01).listen();
-        let cubeHeight = folderSize.add(bbox, 'height').name("height").min(0.3).max(5).step(0.01).listen();
+        let cubeWidth = folderSize.add(bbox, 'width').name("width").min(0.3).max(10).step(0.01).listen();
+        let cubeHeight = folderSize.add(bbox, 'height').name("height").min(0.3).max(10).step(0.01).listen();
         folderSize.close();
         this.folderSizeArray.push(folderSize);
         this.sizeControllersArray[folderInsertIdx] = { length: cubeLength, width: cubeWidth, height: cubeHeight };

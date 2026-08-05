@@ -204,13 +204,13 @@ text {
     background: seagreen;
 }
 
-#canvasSideView {
+#canvasBev {
     position: fixed;
     width: 33.33vw;
     /*height: 311px;*/
     z-index: 102;
     left: 0px;
-    /*top: 290px;*/
+    /*top: 910px;*/
     border: 1px;
     border-style: outset;
 }
@@ -226,13 +226,13 @@ text {
     border-style: outset;
 }
 
-#canvasBev {
+#canvasSideView {
     position: fixed;
     width: 33.33vw;
     /*height: 311px;*/
     z-index: 102;
     left: 0px;
-    /*top: 910px;*/
+    /*top: 290px;*/
     border: 1px;
     border-style: outset;
 }
