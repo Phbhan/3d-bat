@@ -8,10 +8,13 @@ Mirrors the TS logic 1:1, including:
 - yaw-only rotation about the box center
 - the "vehicle_camera_basler_16mm" infrastructure<->vehicle transform special case
 - dropping boxes where any corner projects behind the camera (point2D[2] <= 0)
+
+Supports batched projection of multiple boxes in a single call.
 """
 import numpy as np
 import torch
 from src.od3d.od3d import project_bbox3d
+
 
 def _rotation_matrix_z(yaw: float) -> np.ndarray:
     """4x4 homogeneous rotation matrix about Z, matching THREE.Euler(0,0,yaw,'XYZ')."""
@@ -25,8 +28,7 @@ def _rotation_matrix_z(yaw: float) -> np.ndarray:
 
 
 def _corner_points(x, y, z, length, width, height, x_dir, y_dir, z_dir):
-    # print("x_dir: ", x_dir, "y_dir: ", y_dir, "z_dir: ", z_dir)
-    # print("x: ", x, "y: ", y, "z: ", z, "length: ", length, "width: ", width, "height: ", height)
+    # z is forced to height/2 so the box sits on the ground plane (matches TS).
     z = height / 2
     if x_dir == "forward" and y_dir == "left" and z_dir == "up":
         return [
@@ -34,7 +36,6 @@ def _corner_points(x, y, z, length, width, height, x_dir, y_dir, z_dir):
             (x + length / 2, y - width / 2, z - height / 2),
             (x - length / 2, y - width / 2, z - height / 2),
             (x - length / 2, y + width / 2, z - height / 2),
-            
             (x + length / 2, y + width / 2, z + height / 2),
             (x + length / 2, y - width / 2, z + height / 2),
             (x - length / 2, y - width / 2, z + height / 2),
@@ -51,84 +52,118 @@ def _corner_points(x, y, z, length, width, height, x_dir, y_dir, z_dir):
             (x + length / 2, y - width / 2, z + height / 2),
             (x - length / 2, y - width / 2, z + height / 2),
         ]
-        
     else:
         raise ValueError(f"Unsupported coordinate system: x={x_dir}, y={y_dir}, z={z_dir}")
 
 
-def calculate_projected_bounding_box(
-    x_pos, y_pos, z_pos, length, width, height, yaw,
-    coordinate_system,          # {"x-axis":..., "y-axis":..., "z-axis":...}
-    zoom_factor,                # this.labelTool.imageScale[channelIdx]
-    channel_name,
-):
+def _box_to_corners_tensor(x_pos, y_pos, z_pos, length, width, height, yaw, coordinate_system):
+    """
+    Build a single box's 9 points (8 corners + center) as a (3, 9) float64 array.
+    """
     x_dir = coordinate_system["x-axis"]
     y_dir = coordinate_system["y-axis"]
     z_dir = coordinate_system["z-axis"]
 
-    # Generate the 8 box corners
     corners = _corner_points(
-        x_pos,
-        y_pos,
-        z_pos,
-        length,
-        width,
-        height,
-        x_dir,
-        y_dir,
-        z_dir,
+        x_pos, y_pos, z_pos, length, width, height, x_dir, y_dir, z_dir
     )
 
-    # Rotation matrix around Z
     rot = _rotation_matrix_z(yaw)
 
     rotated_points = []
     for cx, cy, cz in corners:
-        # Corner in local object coordinates
-        local = np.array(
-            [
-                cx - x_pos,
-                cy - y_pos,
-                cz - z_pos,
-                1.0,
-            ],
-            dtype=np.float64,
-        )
-        # Rotate around object center
+        local = np.array([cx - x_pos, cy - y_pos, cz - z_pos, 1.0], dtype=np.float64)
         rotated = rot @ local
-        # Back to world coordinates
         point = np.array(
-            [
-                rotated[0] + x_pos,
-                rotated[1] + y_pos,
-                rotated[2] + z_pos,
-            ],
+            [rotated[0] + x_pos, rotated[1] + y_pos, rotated[2] + z_pos],
             dtype=np.float64,
         )
         rotated_points.append(point)
 
-    # Add box center (9th point)
+    # 9th point = box center
     center = np.array([x_pos, y_pos, z_pos], dtype=np.float64)
     rotated_points.append(center)
 
-    # (9,3) -> (3,9)
-    bbox = np.asarray(rotated_points, dtype=np.float64).T
-    # (1,1,3,9)
-    bbox = torch.from_numpy(bbox).unsqueeze(0).unsqueeze(0)
+    # (9, 3) -> (3, 9)
+    return np.asarray(rotated_points, dtype=np.float64).T
 
-    # Project using fisheye camera
-    image_points = project_bbox3d(
-        bbox,
-        channel_name
+
+def calculate_projected_bounding_box(
+    x_pos, y_pos, z_pos, length, width, height, yaw,
+    coordinate_system,
+    zoom_factor,
+    channel_name,
+):
+    """
+    Project a single 3D box into one camera channel.
+    Thin wrapper around the batched path so existing single-box callers keep working.
+    """
+    results = calculate_projected_bounding_boxes(
+        boxes=[{
+            "x": x_pos, "y": y_pos, "z": z_pos,
+            "length": length, "width": width, "height": height, "yaw": yaw,
+        }],
+        coordinate_system=coordinate_system,
+        zoom_factor=zoom_factor,
+        channel_name=channel_name,
     )
-    # (9,2)
-    pts = image_points[0, 0].permute(1, 0)
+    # Always return the first (and only) element of the array
+    return results[0]
 
-    # Apply display zoom
-    pts *= zoom_factor
-    # print("zoom_factor: ", zoom_factor)
-    # Return only the 8 box corners
-    return pts[:8].cpu().numpy().tolist()
+
+def calculate_projected_bounding_boxes(
+    boxes,
+    coordinate_system,
+    zoom_factor,
+    channel_name,
+):
+    """
+    Project multiple 3D boxes into one camera channel in a single fisheye call.
+
+    Args:
+        boxes: list of dicts, each with keys
+               x, y, z, length, width, height, yaw
+               (also accepts a single dict — it is wrapped into a list)
+        coordinate_system: {"x-axis":..., "y-axis":..., "z-axis":...}
+        zoom_factor: display scale for this channel
+        channel_name: key into fisheye_cams, e.g. "CAM_FRONT"
+
+    Returns:
+        list of length N, where each element is the 8 corner points as
+        [[x, y], ...] (Python lists).  Always a list, even when N == 1.
+    """
+    if isinstance(boxes, dict):
+        boxes = [boxes]
+    if not boxes:
+        return []
+
+    # Stack every box into (N, 3, 9)
+    stacked = np.stack(
+        [
+            _box_to_corners_tensor(
+                b["x"], b["y"], b["z"],
+                b["length"], b["width"], b["height"],
+                b["yaw"],
+                coordinate_system,
+            )
+            for b in boxes
+        ],
+        axis=0,
+    )  # (N, 3, 9)
+
+    # (1, N, 3, 9) — batch dimension is the second axis, matching the original
+    # single-box layout of (1, 1, 3, 9)
+    bbox = torch.from_numpy(stacked).unsqueeze(0)
+
+    image_points = project_bbox3d(bbox, channel_name)
+    # image_points expected shape: (1, N, 2, 9) or compatible
+
+    pts = image_points[0]          # (N, 2, 9)
+    pts = pts.permute(0, 2, 1)     # (N, 9, 2)
+    pts = pts[:, :8, :]            # drop center point → (N, 8, 2)
+    pts = pts * zoom_factor
+
+    return pts.cpu().numpy().tolist()  # list[list[list[float]]]  N x 8 x 2
 
 
 def project_points(points3d, projection_matrix, scaling_factor):

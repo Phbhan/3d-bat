@@ -397,14 +397,17 @@ class LabelTool {
     }
 
     loadImageData() {
-        for (let i = 0; i < this.numFrames; i++) {
-            for (let camChannelObj in this.cameraChannels) {
-                if (this.cameraChannels.hasOwnProperty(camChannelObj)) {
-                    let camChannelObject = this.cameraChannels[camChannelObj];
-                    this.labelToolImage.loadCameraImages(camChannelObject.channel, i, this);
+        if(this.labelToolImage.imageArrayAll.length == 0)
+        {
+            for (let i = 0; i < this.numFrames; i++) {
+                for (let camChannelObj in this.cameraChannels) {
+                    if (this.cameraChannels.hasOwnProperty(camChannelObj)) {
+                        let camChannelObject = this.cameraChannels[camChannelObj];
+                        this.labelToolImage.loadCameraImages(camChannelObject.channel, i, this);
+                    }
                 }
+                this.labelToolImage.imageArrayAll.push(this.labelToolImage.imageArray);
             }
-            this.labelToolImage.imageArrayAll.push(this.labelToolImage.imageArray);
         }
 
         for (let i = 0; i < this.cameraChannels.length; i++) {
@@ -797,12 +800,53 @@ class LabelTool {
 
         this.currentFrameIndex = newFileIndex;
         this.annotationObjects.__selectionIndexCurrentFrame = this.annotationObjects.__selectionIndexNextFrame;
+
+        // --- timing instrumentation -------------------------------------------------
+        // Measures each stage of a frame switch so you can see where the time actually
+        // goes (open DevTools console). loadImageData/loadPointCloudData are synchronous
+        // calls (any async work they kick off internally, like image decoding, isn't
+        // captured here - just the synchronous portion, which is also where the
+        // "already cached, just re-attach to scene" cost shows up on frames visited
+        // before). draw2DProjections/setHDMap are awaited so their timings cover the
+        // full round trip including the network request(s).
+        const frameSwitchStart = performance.now();
+        const timings: { [stage: string]: number } = {};
+
+        const t0 = performance.now();
         this.loadImageData();
-        this.labelToolImage.draw2DProjections();
+        timings['loadImageData (sync portion)'] = performance.now() - t0;
 
+        const t1 = performance.now();
+        this.labelToolImage.draw2DProjections().then(() => {
+            timings['draw2DProjections (image boxes, network)'] = performance.now() - t1;
+            this.logFrameSwitchTimings(newFileIndex, timings, frameSwitchStart);
+        });
+
+        const t2 = performance.now();
         this.labelTool3D.loadPointCloudData();
-        this.labelTool3D.setHDMap();
+        timings['loadPointCloudData (sync portion)'] = performance.now() - t2;
 
+        const t3 = performance.now();
+        this.labelTool3D.setHDMap().then(() => {
+            timings['setHDMap (network)'] = performance.now() - t3;
+            this.logFrameSwitchTimings(newFileIndex, timings, frameSwitchStart);
+        });
+        // --- end timing instrumentation ----------------------------------------------
+
+    }
+
+    /**
+     * Prints a running table of how long each stage of the most recent changeFrame()
+     * took. Called once per finished async stage, so the table fills in as pieces
+     * complete rather than waiting for everything - open the browser console and
+     * navigate frames to see it. Remove this (and its call sites in changeFrame) once
+     * you've found the bottleneck; it's a debugging aid, not meant to ship long-term.
+     */
+    private logFrameSwitchTimings(frameIndex: number, timings: { [stage: string]: number }, startTime: number) {
+        console.log(`[frame ${frameIndex}] elapsed so far: ${(performance.now() - startTime).toFixed(1)}ms`);
+        console.table(
+            Object.entries(timings).map(([stage, ms]) => ({stage, ms: Number(ms.toFixed(1))}))
+        );
     }
 
     previousFrame() {

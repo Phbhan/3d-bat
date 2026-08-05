@@ -226,6 +226,7 @@ class LabelTool3D {
 
     responseData;
     saveAnnotationsNow = true;
+    pointCloudLoadingPromise: Promise<void> | null = null;
 
     constructor(labelTool: LabelTool, annotationClasses: AnnotationClass, annotationObjects: AnnotationObject, labelToolImage: LabelToolImage) {
         this.labelTool = labelTool;
@@ -950,53 +951,88 @@ class LabelTool3D {
         this.initViews();
     }
 
-    loadPointCloudData() {
-        // ASCII pcd files
-        let pcdLoader = new PCDLoader();
-        let pointCloudFullURL: string;
-        let pointCloudWithoutGroundURL: string = "";
+    async loadPointCloudData() {
+        // Already loaded
+        if (this.labelTool.pointCloudLoaded) {
+            const pointCloudScan =
+                this.pointCloudScanMap[this.labelTool.currentFrameIndex];
 
-
-        // load all point cloud scans in the beginning
-        if (this.labelTool.pointCloudLoaded === false) {
-            for (let i = 0; i < this.labelTool.numFrames; i++) {
-                let data_set = this.labelTool.currentDataset;
-                let seq = this.labelTool.currentSequence;
-                let lidar = this.labelTool.currentLidarChannel['channel'];
-                let file = this.labelTool.pointCloudFileNames[i];
-                pointCloudFullURL = `input/${data_set}/${seq}/point_clouds/${lidar}/${file}`;
-
-                pcdLoader.load(pointCloudFullURL, (mesh: Points) => {
-                    mesh.name = 'pointcloud-scan-' + i;
-                    // @ts-ignore
-                    mesh.material.vertexColors = THREE.VertexColors;
-                    // @ts-ignore
-                    mesh.material.size = Number(this.pointSizeCurrent);
-                    let colors = mesh.geometry.getAttribute('color')?.array;
-                    if (!colors || colors.length == 0) {
-                        colors = Array(mesh.geometry.attributes.position.array.length).fill(255);
-                    }
-
-                    mesh.geometry.setAttribute('color', new Float32BufferAttribute(colors, 3, true));
-
-                    this.pointCloudScanMap[i] = mesh;
-                    if (i === this.labelTool.currentFrameIndex) {
-                        this.scene.add(mesh);
-                    }
-                });
-                if (pointCloudWithoutGroundURL) {
-                    pcdLoader.load(pointCloudWithoutGroundURL, (mesh) => {
-                        mesh.name = 'pointcloud-scan-no-ground-' + i;
-                        this.pointCloudScanNoGroundList.push(mesh);
-                    });
-                }
-            }
-        } else {
-            let pointCloudScan = this.pointCloudScanMap[this.labelTool.currentFrameIndex];
             // @ts-ignore
             pointCloudScan.material.size = this.pointSizeCurrent;
             this.scene.add(pointCloudScan);
+            return;
         }
+
+        // Loading in progress
+        if (this.pointCloudLoadingPromise) {
+            await this.pointCloudLoadingPromise;
+
+            const pointCloudScan =
+                this.pointCloudScanMap[this.labelTool.currentFrameIndex];
+
+            // @ts-ignore
+            pointCloudScan.material.size = this.pointSizeCurrent;
+            this.scene.add(pointCloudScan);
+            return;
+        }
+
+        const pcdLoader = new PCDLoader();
+
+        this.pointCloudLoadingPromise = Promise.all(
+            Array.from({ length: this.labelTool.numFrames }, (_, i) => {
+                return new Promise<void>((resolve, reject) => {
+                    const dataSet = this.labelTool.currentDataset;
+                    const seq = this.labelTool.currentSequence;
+                    const lidar = this.labelTool.currentLidarChannel["channel"];
+                    const file = this.labelTool.pointCloudFileNames[i];
+
+                    const pointCloudFullURL =
+                        `input/${dataSet}/${seq}/point_clouds/${lidar}/${file}`;
+
+                    pcdLoader.load(
+                        pointCloudFullURL,
+                        (mesh: Points) => {
+                            mesh.name = `pointcloud-scan-${i}`;
+
+                            // @ts-ignore
+                            mesh.material.vertexColors = THREE.VertexColors;
+
+                            // @ts-ignore
+                            mesh.material.size = Number(this.pointSizeCurrent);
+
+                            let colors = mesh.geometry.getAttribute("color")?.array;
+                            if (!colors || colors.length === 0) {
+                                colors = Array(
+                                    mesh.geometry.attributes.position.array.length
+                                ).fill(255);
+                            }
+
+                            mesh.geometry.setAttribute(
+                                "color",
+                                new Float32BufferAttribute(colors, 3, true)
+                            );
+
+                            this.pointCloudScanMap[i] = mesh;
+
+                            resolve();
+                        },
+                        undefined,
+                        reject
+                    );
+                });
+            })
+        ).then(() => {
+            this.labelTool.pointCloudLoaded = true;
+
+            const pointCloudScan =
+                this.pointCloudScanMap[this.labelTool.currentFrameIndex];
+
+            // @ts-ignore
+            pointCloudScan.material.size = this.pointSizeCurrent;
+            this.scene.add(pointCloudScan);
+        });
+
+        await this.pointCloudLoadingPromise;
     }
 
     //draw animation

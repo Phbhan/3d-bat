@@ -4,52 +4,71 @@ from flask import Flask
 from flask import request
 from src.server.pre_annotate import predict_yaw
 from src.server.active_learning import pvrcnn_inference
-from src.od3d import calculate_projected_bounding_box, project_points
+from src.od3d import calculate_projected_bounding_boxes, project_points
 from os import path
+import time
 
 app = Flask(__name__)
 
- 
+
 @app.route("/project_bounding_box", methods=['POST'])
 def project_bounding_box():
     """
-    Batched: projects ONE box into MANY camera channels in a single request,
-    so the client only needs one HTTP round-trip per box update (not one per
-    channel, not one per corner).
- 
-    Expects:
+    Batched: projects one or more 3D boxes into ALL camera channels in a
+    single request.
+
+    Preferred payload:
     {
-        "box": {"x":.., "y":.., "z":.., "length":.., "width":.., "height":.., "yaw":..},
+        "boxes": [
+            {"x":.., "y":.., "z":.., "length":.., "width":.., "height":.., "yaw":..},
+            ...
+        ],
         "coordinateSystem": {"x-axis":.., "y-axis":.., "z-axis":..},
         "channels": [
-            {
-                "channel": "CAM_FRONT",
-                "projectionMatrix": [[..],[..],[..]],
-                "zoomFactor": 1.0,
-                "infraTransformMatrix": null  // optional, 4x4, only for vehicle_camera_basler_16mm
-            },
+            {"channel": "CAM_FRONT", "zoomFactor": 1.0, ...},
             ...
         ]
     }
-    Returns: { "CAM_FRONT": [[x,y], ...] or [], "CAM_BACK": [...], ... }
+
+    Legacy single-box payload still accepted:
+    { "box": {...}, "coordinateSystem": {...}, "channels": [...] }
+
+    Returns:
+        { "CAM_FRONT": [ [[x,y],...8], [[x,y],...8], ... ],  # one list per box
+          "CAM_BACK":  [ ... ],
+          ... }
+    Always a list per channel (even when only 1 box is sent).
     """
     data = request.json
-    box = data['box']
     coordinate_system = data['coordinateSystem']
- 
+
+    # Prefer multi-box; fall back to legacy single "box"
+    if 'boxes' in data and data['boxes'] is not None:
+        boxes = data['boxes']
+        if isinstance(boxes, dict):
+            boxes = [boxes]
+    elif 'box' in data and data['box'] is not None:
+        boxes = [data['box']]
+    else:
+        return jsonify({}), 400
+    
     result = {}
     for ch in data['channels']:
-        result[ch['channel']] = calculate_projected_bounding_box(
-            box['x'], box['y'], box['z'],
-            box['length'], box['width'], box['height'],
-            box['yaw'],
-            coordinate_system,
-            ch.get('zoomFactor', 1.0),
-            ch['channel']
+        channel_name = ch['channel']
+        zoom_factor = ch.get('zoomFactor', 1.0)
+        # Always returns list of length len(boxes)
+        result[channel_name] = calculate_projected_bounding_boxes(
+            boxes=boxes,
+            coordinate_system=coordinate_system,
+            zoom_factor=zoom_factor,
+            channel_name=channel_name,
         )
-    return jsonify(result)
- 
- 
+    
+    response = jsonify(result)
+
+    return response
+
+
 @app.route("/project_points", methods=['POST'])
 def project_points_route():
     """
@@ -129,7 +148,9 @@ def connect_to_workstation():
 
         return jsonify({"error": str(e)})
 
+@app.route("/")
+def home():
+    return "Gunicorn Flask server is running"
 
 if __name__ == "__main__":
-    app.run(debug=True)
-
+    app.run(debug=True, threaded=True)
