@@ -64,6 +64,7 @@ import {
     Object3D,
     OrthographicCamera,
     PerspectiveCamera,
+    Plane,
     PlaneGeometry,
     Points,
     PointsMaterial,
@@ -1090,6 +1091,53 @@ class LabelTool3D {
         return () => restoreOps.forEach(restore => restore());
     }
 
+    // Max distance (in the same units as the point cloud/annotations, typically
+    // meters) from the selected object's center that points are still shown in
+    // the side/front/BEV helper views. Points farther away are clipped out so
+    // the helper views stay focused on the object being labeled instead of
+    // showing the whole surrounding scan. Does not affect the main view.
+    static readonly HELPER_VIEW_POINT_CLOUD_RADIUS = 5;
+
+    // Temporarily restricts the currently-loaded point cloud to a cube of side
+    // 2*HELPER_VIEW_POINT_CLOUD_RADIUS centered on the selected object, using
+    // per-material clipping planes, and returns a function that restores the
+    // previous (unclipped) state. Call this right before rendering the helper
+    // views and call the returned function right after, same pattern as
+    // isolateSelectedBoxForHelperViews().
+    clipPointCloudForHelperViews(selectedMesh: Mesh): () => void {
+        const pointCloud = this.pointCloudScanMap[this.labelTool.currentFrameIndex];
+        if (!pointCloud || !pointCloud.material) {
+            return () => {};
+        }
+
+        const center = LabelTool3D.getObjectCenter(selectedMesh);
+        const r = LabelTool3D.HELPER_VIEW_POINT_CLOUD_RADIUS;
+
+        // Axis-aligned box clip (cheap, uses THREE's built-in material clipping
+        // planes) rather than a true sphere: keep center.x-r <= x <= center.x+r,
+        // and likewise for y and z.
+        const clippingPlanes = [
+            new Plane(new Vector3(1, 0, 0), r - center.x),   // keep x >= center.x - r
+            new Plane(new Vector3(-1, 0, 0), r + center.x),  // keep x <= center.x + r
+            new Plane(new Vector3(0, 1, 0), r - center.y),   // keep y >= center.y - r
+            new Plane(new Vector3(0, -1, 0), r + center.y),  // keep y <= center.y + r
+            new Plane(new Vector3(0, 0, 1), r - center.z),   // keep z >= center.z - r
+            new Plane(new Vector3(0, 0, -1), r + center.z),  // keep z <= center.z + r
+        ];
+
+        const material = pointCloud.material as PointsMaterial;
+        const previousPlanes = material.clippingPlanes;
+        const wasLocalClippingEnabled = this.renderer.localClippingEnabled;
+
+        this.renderer.localClippingEnabled = true;
+        material.clippingPlanes = clippingPlanes;
+
+        return () => {
+            material.clippingPlanes = previousPlanes;
+            this.renderer.localClippingEnabled = wasLocalClippingEnabled;
+        };
+    }
+
     hideMasterViews() {
         $("#canvasSideView").hide();
         $("#canvasFrontView").hide();
@@ -1110,6 +1158,7 @@ class LabelTool3D {
 
         if (this.selectedMesh !== undefined) {
             let restoreBoxState = this.isolateSelectedBoxForHelperViews(this.selectedMesh);
+            let restorePointCloudState = this.clipPointCloudForHelperViews(this.selectedMesh);
 
             for (let i = 1; i < this.views.length; i++) {
                 let view = this.views[i];
@@ -1122,6 +1171,7 @@ class LabelTool3D {
                 this.renderer.render(this.scene, camera);
             }
 
+            restorePointCloudState();
             restoreBoxState();
         }
 
@@ -1185,12 +1235,14 @@ class LabelTool3D {
                 width: window.innerWidth / 3,
                 height: viewHeight,
                 background: new THREE.Color(22 / 256.0, 22 / 256.0, 22 / 256.0),
-                up: [-1, 0, 0],
+                up: [0, -1, 0],
                 fov: 70,
                 zoom: 1,
                 updateCamera: function (camera, scene, selectedMesh) {
                     let center = LabelTool3D.getObjectCenter(selectedMesh);
-                    camera.position.set(center.x + 10, center.y, center.z);
+                    // Side view looks along the lateral (Y) axis so it shows the
+                    // length x height (X-Z) profile of the object.
+                    camera.position.set(center.x, center.y + 10, center.z);
                     camera.lookAt(center);
                     LabelTool3D.fitOrthoCameraToObject(camera, selectedMesh, this);
                 }
@@ -1203,12 +1255,14 @@ class LabelTool3D {
                 width: window.innerWidth / 3,
                 height: viewHeight,
                 background: new THREE.Color(22 / 256.0, 22 / 256.0, 22 / 256.0),
-                up: [0, -1, 0],
+                up: [-1, 0, 0],
                 fov: 70,
                 zoom: 1,
                 updateCamera: function (camera, scene, selectedMesh) {
                     let center = LabelTool3D.getObjectCenter(selectedMesh);
-                    camera.position.set(center.x, center.y + 10, center.z);
+                    // Front view looks along the forward (X) axis so it shows the
+                    // width x height (Y-Z) profile of the object.
+                    camera.position.set(center.x + 10, center.y, center.z);
                     camera.lookAt(center);
                     LabelTool3D.fitOrthoCameraToObject(camera, selectedMesh, this);
                 }
@@ -2368,7 +2422,6 @@ class LabelTool3D {
             this.removeTransformControls();
         }
         this.annotationObjects.select(this.clickedObjectIndex);
-
         // uncolor previous selected object in image view
         if (this.clickedObjectIndexPrevious !== -1) {
             this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, this.clickedObjectIndexPrevious, false);
@@ -2699,12 +2752,11 @@ class LabelTool3D {
 
 
     getInsertIndex(fileIndex: number = this.labelTool.currentFrameIndex): number {
-        const idx = this.annotationObjects.__selectionIndexCurrentFrame;
-        if (idx === -1 || fileIndex !== this.labelTool.currentFrameIndex
-            || this.annotationObjects.contents[fileIndex][idx] === undefined) {
+        if (this.annotationObjects.__selectionIndexCurrentFrame === -1 || fileIndex !== this.labelTool.currentFrameIndex) {
             return this.annotationObjects.contents[fileIndex].length;
+        } else {
+            return this.annotationObjects.__selectionIndexCurrentFrame;
         }
-        return idx;
     }
 
     track = async (box: AnnotationObjectParams) => {
