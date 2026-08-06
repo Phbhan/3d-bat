@@ -15,32 +15,92 @@
         {
           "name": "CAR",
           "annotation_color": "#E66B5B",
-          "attributes": []
+          "attributes": [
+            {
+              "name": "Visibility",
+              "style": "dropdown",
+              "values": [
+                "CLEARLY",
+                "OCCLUDED"
+              ],
+              "default": "CLEARLY"
+            }
+          ]
         },
         {
           "name": "TRUCK",
           "annotation_color": "#4DA664",
-          "attributes": []
+          "attributes": [
+            {
+              "name": "Visibility",
+              "style": "dropdown",
+              "values": [
+                "CLEARLY",
+                "OCCLUDED"
+              ],
+              "default": "CLEARLY"
+            }
+          ]
         },
         {
           "name": "BUS",
           "annotation_color": "#75706B",
-          "attributes": []
+          "attributes": [
+            {
+              "name": "Visibility",
+              "style": "dropdown",
+              "values": [
+                "CLEARLY",
+                "OCCLUDED"
+              ],
+              "default": "CLEARLY"
+            }
+          ]
         },
         {
           "name": "BICYCLE",
           "annotation_color": "#F7C23E",
-          "attributes": []
+          "attributes": [
+            {
+              "name": "Visibility",
+              "style": "dropdown",
+              "values": [
+                "CLEARLY",
+                "OCCLUDED"
+              ],
+              "default": "CLEARLY"
+            }
+          ]
         },
         {
           "name": "PEDESTRIAN",
           "annotation_color": "#3585C5",
-          "attributes": []
+          "attributes": [
+            {
+              "name": "Visibility",
+              "style": "dropdown",
+              "values": [
+                "CLEARLY",
+                "OCCLUDED"
+              ],
+              "default": "CLEARLY"
+            }
+          ]
         },
         {
           "name": "MOTORCYCLE",
           "annotation_color": "#9069B5",
-          "attributes": []
+          "attributes": [
+            {
+              "name": "Visibility",
+              "style": "dropdown",
+              "values": [
+                "CLEARLY",
+                "OCCLUDED"
+              ],
+              "default": "CLEARLY"
+            }
+          ]
         }
       ],
       "position_lidar": [
