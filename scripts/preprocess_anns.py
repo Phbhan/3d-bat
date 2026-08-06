@@ -48,27 +48,37 @@ def modify_box_annotations(
     z_value: float = BOX_Z_VALUE,
 ):
     """
-    Modify all 3D bounding boxes in OpenLABEL JSON files.
+    Modify all 3D bounding boxes in the custom annotation format.
 
-    For every cuboid:
+    Input format:
+
+    {
+        "name": "...",
+        "cam_pos": "...",
+        "timestamp": ...,
+        "index": ...,
+        "weather": "...",
+        "labels": [
+            {
+                "id": ...,
+                "category": "...",
+                "box3d": {
+                    "dimension": {...},
+                    "location": {
+                        "x": ...,
+                        "y": ...,
+                        "z": ...
+                    },
+                    "orientation": {...}
+                }
+            }
+        ]
+    }
+
+    For every box:
         x = x + x_offset
         y = unchanged
         z = z_value
-
-    The cuboid format is assumed to be:
-
-        val = [
-            x,
-            y,
-            z,
-            qx,
-            qy,
-            qz,
-            qw,
-            length,
-            width,
-            height
-        ]
     """
 
     json_files = sorted(annotation_dir.glob("*.json"))
@@ -89,59 +99,47 @@ def modify_box_annotations(
             print(f"[ERROR] Failed to read {file_path}: {e}")
             continue
 
-        file_box_count = 0
+        labels = data.get("labels")
 
-        try:
-            frames = data["openlabel"]["frames"]
-        except KeyError:
-            print(f"[WARN] No openlabel.frames found: {file_path}")
+        if labels is None:
+            print(f"[WARN] No labels found: {file_path}")
             continue
 
-        for frame_id, frame_data in frames.items():
-            objects = frame_data.get("objects", {})
+        file_box_count = 0
 
-            for object_id, object_data in objects.items():
-                cuboid = (
-                    object_data
-                    .get("object_data", {})
-                    .get("cuboid")
-                )
+        for label in labels:
+            location = (
+                label.get("box3d", {})
+                     .get("location")
+            )
 
-                if cuboid is None:
-                    continue
+            if location is None:
+                continue
 
-                val = cuboid.get("val")
+            try:
+                old_x = float(location["x"])
+                old_y = float(location["y"])
+                old_z = float(location["z"])
+            except KeyError:
+                print(f"[WARN] Invalid location in {file_path}")
+                continue
 
-                if not isinstance(val, list) or len(val) < 3:
-                    print(
-                        f"[WARN] Invalid cuboid val in "
-                        f"{file_path}, frame={frame_id}, object={object_id}"
-                    )
-                    continue
+            location["x"] = old_x + x_offset
+            location["y"] = old_y
+            location["z"] = z_value
 
-                old_x = val[0]
-                old_y = val[1]
-                old_z = val[2]
+            file_box_count += 1
 
-                # Apply requested transformation.
-                val[0] = old_x + x_offset
-                val[1] = old_y
-                val[2] = z_value
-
-                file_box_count += 1
-
-                print(
-                    f"{file_path.name} | "
-                    f"frame={frame_id} | "
-                    f"object={object_id} | "
-                    f"xyz: "
-                    f"({old_x:.3f}, {old_y:.3f}, {old_z:.3f}) "
-                    f"-> "
-                    f"({val[0]:.3f}, {val[1]:.3f}, {val[2]:.3f})"
-                )
+            print(
+                f"{file_path.name} | "
+                f"id={label.get('id')} | "
+                f"xyz: "
+                f"({old_x:.3f}, {old_y:.3f}, {old_z:.3f}) "
+                f"-> "
+                f"({location['x']:.3f}, {location['y']:.3f}, {location['z']:.3f})"
+            )
 
         if file_box_count > 0:
-            # Keep the JSON readable.
             with open(file_path, "w") as f:
                 json.dump(data, f, indent=2)
 
@@ -154,8 +152,8 @@ def modify_box_annotations(
     print(f"JSON files processed: {total_files}")
     print(f"JSON files modified:  {modified_files}")
     print(f"Boxes modified:       {total_boxes}")
-    print(f"X offset:              {x_offset} m")
-    print(f"Z value:               {z_value} m")
+    print(f"X offset:             {x_offset} m")
+    print(f"Z value:              {z_value} m")
 
 
 def main():
