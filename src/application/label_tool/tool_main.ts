@@ -799,7 +799,7 @@ class LabelTool {
         }
 
         this.currentFrameIndex = newFileIndex;
-        this.annotationObjects.__selectionIndexCurrentFrame = this.annotationObjects.__selectionIndexNextFrame;
+        // this.annotationObjects.__selectionIndexCurrentFrame = this.annotationObjects.__selectionIndexNextFrame;
 
         // --- timing instrumentation -------------------------------------------------
         // Measures each stage of a frame switch so you can see where the time actually

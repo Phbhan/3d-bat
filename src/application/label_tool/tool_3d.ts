@@ -2699,11 +2699,12 @@ class LabelTool3D {
 
 
     getInsertIndex(fileIndex: number = this.labelTool.currentFrameIndex): number {
-        if (this.annotationObjects.__selectionIndexCurrentFrame === -1 || fileIndex !== this.labelTool.currentFrameIndex) {
+        const idx = this.annotationObjects.__selectionIndexCurrentFrame;
+        if (idx === -1 || fileIndex !== this.labelTool.currentFrameIndex
+            || this.annotationObjects.contents[fileIndex][idx] === undefined) {
             return this.annotationObjects.contents[fileIndex].length;
-        } else {
-            return this.annotationObjects.__selectionIndexCurrentFrame;
         }
+        return idx;
     }
 
     track = async (box: AnnotationObjectParams) => {
