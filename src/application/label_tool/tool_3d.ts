@@ -1500,12 +1500,14 @@ class LabelTool3D {
         if (this.dragControls === true) {
             if (this.selectedMesh !== undefined) {
                 this.selectedMesh.position.z = 0; // z is always locked to ground level (0)
-                this.updateObjectPosition();
-                let objectIndexByTrackId = this.annotationObjects.getObjectIndexByName(this.selectedMesh.name);
-                this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, objectIndexByTrackId, true);
+                let isChange = this.updateObjectPosition();
+                if (isChange) {
+                    let objectIndexByTrackId = this.annotationObjects.getObjectIndexByName(this.selectedMesh.name);
+                    this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, objectIndexByTrackId, true);
+                }
             }
         }
-        this.render();
+            this.render();
     }
 
     onDraggingChangedHandler = (event: THREE.Event) => {
@@ -1514,10 +1516,12 @@ class LabelTool3D {
         // update 2d bounding box
         if (this.selectedMesh !== undefined) {
             this.selectedMesh.position.z = 0; // z is always locked to ground level (0)
-            this.updateObjectPosition();
-            let objectIndexByTrackId = this.annotationObjects.getObjectIndexByName(this.selectedMesh.name);
-            this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, objectIndexByTrackId, true);
-            this.render();
+            let isChange = this.updateObjectPosition();
+            if (isChange) {
+                let objectIndexByTrackId = this.annotationObjects.getObjectIndexByName(this.selectedMesh.name);
+                this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, objectIndexByTrackId, true);
+                this.render();
+            }
         }
         // executed after drag finished
         // TODO: scale only on one side using arrows
@@ -1570,6 +1574,12 @@ class LabelTool3D {
     deleteObject(labelIndex: number, fileIndex: number = this.labelTool.currentFrameIndex, undo: boolean = false) {
 
         const box = this.annotationObjects.contents[fileIndex][labelIndex];
+        // Guard against a 2D projection request that was already in flight for this
+        // object (e.g. fired on selection) resolving *after* deletion and drawing a
+        // "ghost" bounding box in the image view. update2DBoundingBox/
+        // projectBoundingBoxToImage/draw2DProjection all check this flag right after
+        // their await and bail out instead of drawing.
+        (<any>box).deleted = true;
         if (!undo) {
             this.operationStack.push({
                 type: 'delete',
@@ -1762,8 +1772,8 @@ class LabelTool3D {
             if (value >= minXPos && value < maxXPos) {
                 // Note: Do not use insertIndex because it might change (if deleting e.g. an object in between)
                 // use track id and class to calculate selection index
-                // let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
-                let selectionIndex = this.annotationObjects.getSelectionIndex();
+                let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
+                // let selectionIndex = this.annotationObjects.getSelectionIndex();
                 if (selectionIndex !== -1) {
                     this.labelTool.cubeArray[this.labelTool.currentFrameIndex][selectionIndex].position.x = value;
                     this.annotationObjects.contents[this.labelTool.currentFrameIndex][selectionIndex]["x"] = value;
@@ -1779,7 +1789,9 @@ class LabelTool3D {
         cubeY.onChange((value: number) => {
             if (value >= minYPos && value < maxYPos) {
                 // let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
-                let selectionIndex = this.annotationObjects.getSelectionIndex();
+                // let selectionIndex = this.annotationObjects.getSelectionIndex();
+                let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
+
                 if (selectionIndex !== -1) {
                     this.labelTool.cubeArray[this.labelTool.currentFrameIndex][selectionIndex].position.y = value;
                     this.annotationObjects.contents[this.labelTool.currentFrameIndex][selectionIndex]["y"] = value;
@@ -1793,7 +1805,9 @@ class LabelTool3D {
 
         cubeZ.onChange((value: number) => {
             // z is always locked to ground level (0); ignore whatever value was entered/dragged
-            let selectionIndex = this.annotationObjects.getSelectionIndex();
+            // let selectionIndex = this.annotationObjects.getSelectionIndex();
+            let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
+
             if (selectionIndex !== -1) {
                 this.labelTool.cubeArray[this.labelTool.currentFrameIndex][selectionIndex].position.z = 0;
                 this.annotationObjects.contents[this.labelTool.currentFrameIndex][selectionIndex]["z"] = 0;
@@ -1808,8 +1822,8 @@ class LabelTool3D {
         });
 
         cubeYaw.onChange((value: number) => {
-            // let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
-            let selectionIndex = this.annotationObjects.getSelectionIndex();
+            let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
+            // let selectionIndex = this.annotationObjects.getSelectionIndex();
             if (selectionIndex !== -1) {
                 this.labelTool.cubeArray[this.labelTool.currentFrameIndex][selectionIndex].rotation.z = value;
                 this.annotationObjects.contents[this.labelTool.currentFrameIndex][selectionIndex]["rotationYaw"] = value;
@@ -1823,8 +1837,8 @@ class LabelTool3D {
         });
 
         cubePitch.onChange((value: number) => {
-            // let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
-            let selectionIndex = this.annotationObjects.getSelectionIndex();
+            let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
+            // let selectionIndex = this.annotationObjects.getSelectionIndex();
 
             if (selectionIndex !== -1) {
 
@@ -1845,8 +1859,8 @@ class LabelTool3D {
         });
 
         cubeRoll.onChange((value: number) => {
-            // let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
-            let selectionIndex = this.annotationObjects.getSelectionIndex();
+            let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
+            // let selectionIndex = this.annotationObjects.getSelectionIndex();
             if (selectionIndex !== -1) {
 
                 if (this.labelTool.rotationConvention == "standard") {
@@ -3754,51 +3768,70 @@ class LabelTool3D {
         this.currentOrbitControls.rotateLeft(MathUtils.degToRad(Number(Key.isDown(KEYS.CODE_RIGHT)) - Number(Key.isDown(KEYS.CODE_LEFT))));
     }
 
-    updateObjectPosition() {
+    updateObjectPosition(): boolean {
         if (!this.selectedMesh) {
-            return;
+            return false;
         }
-        this.selectedMesh.position.z = 0; // z is always locked to ground level (0)
-        const objectIdx = this.annotationObjects.getObjectIndexByName(this.selectedMesh.name)!;
-        this.annotationObjects.contents[this.labelTool.currentFrameIndex][objectIdx]["x"] = this.selectedMesh.position.x;
-        this.annotationObjects.contents[this.labelTool.currentFrameIndex][objectIdx]["y"] = this.selectedMesh.position.y;
-        this.annotationObjects.contents[this.labelTool.currentFrameIndex][objectIdx]["z"] = this.selectedMesh.position.z;
-        this.annotationObjects.contents[this.labelTool.currentFrameIndex][objectIdx]["length"] = this.selectedMesh.scale.x;
-        this.annotationObjects.contents[this.labelTool.currentFrameIndex][objectIdx]["width"] = this.selectedMesh.scale.y;
-        this.annotationObjects.contents[this.labelTool.currentFrameIndex][objectIdx]["height"] = this.selectedMesh.scale.z;
-        this.annotationObjects.contents[this.labelTool.currentFrameIndex][objectIdx]["rotationYaw"] = this.selectedMesh.rotation.z;
-        this.annotationObjects.contents[this.labelTool.currentFrameIndex][objectIdx]["rotationPitch"] = this.selectedMesh.rotation.x;
-        this.annotationObjects.contents[this.labelTool.currentFrameIndex][objectIdx]["rotationRoll"] = this.selectedMesh.rotation.y;
-        // update cube array
-        this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx]["x"] = this.selectedMesh.position.x;
-        this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx]["y"] = this.selectedMesh.position.y;
-        this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx]["z"] = this.selectedMesh.position.z;
-        this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx]["length"] = this.selectedMesh.scale.x;
-        this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx]["width"] = this.selectedMesh.scale.y;
-        this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx]["height"] = this.selectedMesh.scale.z;
-        this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx]["rotationYaw"] = this.selectedMesh.rotation.z;
-        this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx]["rotationPitch"] = this.selectedMesh.rotation.x;
-        this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx]["rotationRoll"] = this.selectedMesh.rotation.y;
 
-        // Write through the actual dat.gui controllers (not just annotationObjects.contents),
-        // using setValue() rather than updateDisplay(). For boxes loaded from existing annotation
-        // files, the GUI's bound object is not always the same object reference as
-        // annotationObjects.contents[...], so writing only to contents left the panel stuck showing
-        // the originally-loaded value. setValue() writes into whatever object the controller is
-        // actually bound to (via controller.object/controller.property) and refreshes the display,
-        // so it's correct regardless of that reference identity.
+        this.selectedMesh.position.z = 0; // z is always locked to ground level (0)
+
+        const objectIdx = this.annotationObjects.getObjectIndexByName(this.selectedMesh.name)!;
+        const obj = this.annotationObjects.contents[this.labelTool.currentFrameIndex][objectIdx];
+
+        // Check whether anything has changed
+        const changed =
+            obj.x !== this.selectedMesh.position.x ||
+            obj.y !== this.selectedMesh.position.y ||
+            obj.z !== this.selectedMesh.position.z ||
+            obj.length !== this.selectedMesh.scale.x ||
+            obj.width !== this.selectedMesh.scale.y ||
+            obj.height !== this.selectedMesh.scale.z ||
+            obj.rotationYaw !== this.selectedMesh.rotation.z ||
+            obj.rotationPitch !== this.selectedMesh.rotation.x ||
+            obj.rotationRoll !== this.selectedMesh.rotation.y;
+
+        if (!changed) {
+            return false;
+        }
+
+        // Update annotation object
+        obj.x = this.selectedMesh.position.x;
+        obj.y = this.selectedMesh.position.y;
+        obj.z = this.selectedMesh.position.z;
+        obj.length = this.selectedMesh.scale.x;
+        obj.width = this.selectedMesh.scale.y;
+        obj.height = this.selectedMesh.scale.z;
+        obj.rotationYaw = this.selectedMesh.rotation.z;
+        obj.rotationPitch = this.selectedMesh.rotation.x;
+        obj.rotationRoll = this.selectedMesh.rotation.y;
+
+        // Update cube array
+        const cube = this.labelTool.cubeArray[this.labelTool.currentFrameIndex][objectIdx];
+        cube["x"] = this.selectedMesh.position.x;
+        cube["y"] = this.selectedMesh.position.y;
+        cube["z"] = this.selectedMesh.position.z;
+        cube["length"] = this.selectedMesh.scale.x;
+        cube["width"] = this.selectedMesh.scale.y;
+        cube["height"] = this.selectedMesh.scale.z;
+        cube["rotationYaw"] = this.selectedMesh.rotation.z;
+        cube["rotationPitch"] = this.selectedMesh.rotation.x;
+        cube["rotationRoll"] = this.selectedMesh.rotation.y;
+
+        // Update GUI
         const positionControllers = this.positionControllersArray[objectIdx];
         if (positionControllers) {
             positionControllers.x.setValue(this.selectedMesh.position.x);
             positionControllers.y.setValue(this.selectedMesh.position.y);
             positionControllers.z.setValue(this.selectedMesh.position.z);
         }
+
         const rotationControllers = this.rotationControllersArray[objectIdx];
         if (rotationControllers) {
             rotationControllers.yaw.setValue(this.selectedMesh.rotation.z);
             rotationControllers.pitch.setValue(this.selectedMesh.rotation.x);
             rotationControllers.roll.setValue(this.selectedMesh.rotation.y);
         }
+
         const sizeControllers = this.sizeControllersArray[objectIdx];
         if (sizeControllers) {
             sizeControllers.length.setValue(this.selectedMesh.scale.x);
@@ -3806,23 +3839,31 @@ class LabelTool3D {
             sizeControllers.height.setValue(this.selectedMesh.scale.z);
         }
 
-        if (this.interpolationMode === true && this.labelTool.frameAnnotationType === "continuous_sequence") {
-            // let selectionIndex = this.annotationObjects.getSelectionIndex();
-            let interpolationStartFileIndex = this.annotationObjects.contents[this.labelTool.currentFrameIndex][this.interpolationObjIndexCurrentFile]["interpolationStartFileIndex"];
+        if (
+            this.interpolationMode &&
+            this.labelTool.frameAnnotationType === "continuous_sequence"
+        ) {
+            const interpolationStartFileIndex =
+                obj.interpolationStartFileIndex;
+
             if (interpolationStartFileIndex !== this.labelTool.currentFrameIndex) {
-                this.annotationObjects.contents[this.labelTool.currentFrameIndex][this.interpolationObjIndexCurrentFile]["interpolationEnd"]["position"]["x"] = this.selectedMesh.position.x;
-                this.annotationObjects.contents[this.labelTool.currentFrameIndex][this.interpolationObjIndexCurrentFile]["interpolationEnd"]["position"]["y"] = this.selectedMesh.position.y;
-                this.annotationObjects.contents[this.labelTool.currentFrameIndex][this.interpolationObjIndexCurrentFile]["interpolationEnd"]["position"]["z"] = this.selectedMesh.position.z;
-                this.annotationObjects.contents[this.labelTool.currentFrameIndex][this.interpolationObjIndexCurrentFile]["interpolationEnd"]["position"]["rotationYaw"] = this.selectedMesh.rotation.z;
-                this.annotationObjects.contents[this.labelTool.currentFrameIndex][this.interpolationObjIndexCurrentFile]["interpolationEnd"]["position"]["rotationPitch"] = this.selectedMesh.rotation.x;
-                this.annotationObjects.contents[this.labelTool.currentFrameIndex][this.interpolationObjIndexCurrentFile]["interpolationEnd"]["position"]["rotationRoll"] = this.selectedMesh.rotation.y;
-                this.annotationObjects.contents[this.labelTool.currentFrameIndex][this.interpolationObjIndexCurrentFile]["interpolationEnd"]["size"]["length"] = this.selectedMesh.scale.x;
-                this.annotationObjects.contents[this.labelTool.currentFrameIndex][this.interpolationObjIndexCurrentFile]["interpolationEnd"]["size"]["width"] = this.selectedMesh.scale.y;
-                this.annotationObjects.contents[this.labelTool.currentFrameIndex][this.interpolationObjIndexCurrentFile]["interpolationEnd"]["size"]["height"] = this.selectedMesh.scale.z;
+                const interpolationEnd = obj.interpolationEnd;
+
+                interpolationEnd.position.x = this.selectedMesh.position.x;
+                interpolationEnd.position.y = this.selectedMesh.position.y;
+                interpolationEnd.position.z = this.selectedMesh.position.z;
+                interpolationEnd.position.rotationYaw = this.selectedMesh.rotation.z;
+                interpolationEnd.position.rotationPitch = this.selectedMesh.rotation.x;
+                interpolationEnd.position.rotationRoll = this.selectedMesh.rotation.y;
+
+                interpolationEnd.size.length = this.selectedMesh.scale.x;
+                interpolationEnd.size.width = this.selectedMesh.scale.y;
+                interpolationEnd.size.height = this.selectedMesh.scale.z;
             }
         }
-    }
 
+        return true;
+    }
 
     changeDataset(datasetName: string) {
         this.labelTool.resetTool();
