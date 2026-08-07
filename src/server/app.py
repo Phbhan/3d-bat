@@ -89,7 +89,7 @@ def save_annotations():
     data = request.json
     
     for i in range(len(data['annotationFiles'])):        
-        filePath = path.join('input', data['dataset'], data['sequence'], 'annotations', data['fileNames'][i])
+        filePath = path.join('input', data['dataset'], data['sequence'], f"annotations_{data['cameraChannel']}", data['fileNames'][i])
         with open(filePath, 'w') as f:
             f.write(data['annotationFiles'][i])
 
@@ -102,7 +102,7 @@ def save_detections():
     data = request.json
 
     for i in range(len(data['annotationFiles'])):
-        filePath = path.join('input', data['dataset'], data['sequence'], 'annotations', data['fileNames'][i])
+        filePath = path.join('input', data['dataset'], data['sequence'], f"annotations_{data['cameraChannel']}", data['fileNames'][i])
         with open(filePath, 'w') as f:
             f.write(data['annotationFiles'][i])
 

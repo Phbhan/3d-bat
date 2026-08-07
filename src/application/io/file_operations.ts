@@ -36,7 +36,7 @@ class FileOperations {
 
     static annotationFileExist(fileIndex, channel, labelTool) {
         let url;
-        url = 'input/' + labelTool.currentDataset + '/' + labelTool.currentSequence + '/annotations/' + labelTool.fileNames[fileIndex] + ".json"
+        url = 'input/' + labelTool.currentDataset + '/' + labelTool.currentSequence + '/annotations_' + labelTool.currentCameraChannel["channel"] + '/' + labelTool.fileNames[fileIndex] + ".json"
         let http = new XMLHttpRequest();
         http.open('HEAD', url, false);
         http.send();
@@ -49,9 +49,9 @@ class FileOperations {
         let frameAnnotations: any[] = [];
 
         try {
-            rawFile.open("GET", '../../input/' + labelTool.currentDataset + '/' + labelTool.currentSequence + '/annotations/'  + fileName, false);
-
+            rawFile.open("GET", '../../input/' + labelTool.currentDataset + '/' + labelTool.currentSequence + '/annotations_' + labelTool.currentCameraChannel["channel"] + '/' + fileName, false);
         } catch (error) {
+            console.error("Annotation file not found: " + '../../input/' + labelTool.currentDataset + '/' + labelTool.currentSequence + '/annotations_' + labelTool.currentCameraChannel["channel"] + '/' + fileName);
             // no labels available for this camera image
             // do not through an error message
         }

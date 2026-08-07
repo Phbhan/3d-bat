@@ -175,16 +175,14 @@ class LabelToolImage{
         // 1. Prepare channels
         // ------------------------------------
         let start = performance.now();
-    
+
         const channels = this.labelTool.cameraChannels.map((ch, idx) => ({
             channel: ch.channel,
             zoomFactor: this.labelTool.imageScale[idx],
         }));
     
         timings["prepare_channels"] = performance.now() - start;
-    
-    
-    
+
         // ------------------------------------
         // 2. JSON stringify
         // ------------------------------------
@@ -203,8 +201,6 @@ class LabelToolImage{
             (requestBody.length / 1024).toFixed(2),
             "KB"
         );
-    
-    
     
         // ------------------------------------
         // 3. Fetch + backend
@@ -226,10 +222,7 @@ class LabelToolImage{
             );
         }
     
-    
         timings["fetch_wait"] = performance.now() - start;
-    
-    
     
         // ------------------------------------
         // 4. JSON parse
@@ -241,8 +234,6 @@ class LabelToolImage{
         } = await response.json();
     
         timings["response.json"] = performance.now() - start;
-    
-    
     
         // ------------------------------------
         // 5. Convert to THREE.Vector2
@@ -269,13 +260,8 @@ class LabelToolImage{
         }
     
     
-        timings["Vector2 conversion"] =
-            performance.now() - start;
-    
-    
-    
-        timings["TOTAL"] =
-            performance.now() - totalStart;
+        timings["Vector2 conversion"] = performance.now() - start;
+        timings["TOTAL"] = performance.now() - totalStart;
     
     
         console.table(timings);
@@ -558,7 +544,6 @@ class LabelToolImage{
         // --------------------------------------------------
         // 3. Process objects
         // --------------------------------------------------
-    
         let assignTime = 0;
         let removeTime = 0;
         let drawTime = 0;

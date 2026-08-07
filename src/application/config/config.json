@@ -121,6 +121,15 @@
       "camera_channels": [
         {
           "channel": "CAM_FRONT"
+        },
+        {
+          "channel": "CAM_FRONT_LEFT"
+        },
+        {
+          "channel": "CAM_FRONT_RIGHT"
+        },
+        {
+          "channel": "CAM_BACK"
         }
       ],
       "weather_type": [

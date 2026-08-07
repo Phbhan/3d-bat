@@ -26,17 +26,12 @@ import { AnnotationClass } from "../annotation/annotation_class";
 
 import { LabelToolImage } from "./tool_image";
 import { LabelTool, ViewModeOption, viewModeOptionsArray } from "./tool_main";
-import {ActiveLearninOption, activeLearningOptionsArray} from "./tool_main";
-import {InferOption, inferenceOptionsArray} from "./tool_main";
-import {EvalOption, evaluationOptionsArray} from "./tool_main";
-import {QueryOption, queryStrategyOptions} from "./tool_main";
 
 import getLoader from "./loaders/loader";
 import { HDMap } from "./hdmap";
 
 
 import {
-    AnimationUtils,
     AxesHelper,
     BoxBufferGeometry,
     BufferGeometry,
@@ -77,21 +72,12 @@ import {
     Vector3,
     WebGLRenderer
 } from "three";
-import arraySlice = AnimationUtils.arraySlice;
-
 export type LabelTool3DParameters = {
     point_size: number
     download: () => void,
     undo: any,
     i: number,
     viewMode: ViewModeOption,
-    modeAL: ActiveLearninOption,
-    inferMode: InferOption
-    evalMode: EvalOption,
-    SelectNums: number,
-    rangeEvalFrames: string,
-    rangeInferFrames: string,
-    QueryStrategy: QueryOption,
     show_projected_points: boolean,
     show_field_of_view: boolean,
     show_grid: boolean,
@@ -99,13 +85,11 @@ export type LabelTool3DParameters = {
     hide_other_annotations: boolean,
     select_all_copy_label_to_next_frame: () => void,
     unselect_all_copy_label_to_next_frame: () => void,
-    show_detections: boolean,
     interpolation_mode: boolean,
     interpolate: () => void,
     reset_all: () => void,
     skip_frames: number,
-    weather_type: string,
-    call_for_inference: () => void
+    weather_type: string
 };
 
 class LabelTool3D {
@@ -169,7 +153,6 @@ class LabelTool3D {
     filterGround: boolean = false;
     hideOtherAnnotations: boolean = false;
     interpolationMode: boolean = false;
-    showDetections: boolean = false;
     birdsEyeViewFlag: boolean = true;
     guiBoundingBoxAnnotationsInitialized: boolean = false;
     guiBoundingBoxMenuInitialized: boolean = false;
@@ -183,14 +166,6 @@ class LabelTool3D {
     selectedViewModeIndex: number = 0;
     viewModeController: dat.GUI.Controller = undefined;
     showMasterViews: boolean = false;
-
-    detectionList: any = [];
-    detectionIndex: number = 0;
-    modeALcontroller: dat.GUI.Controller = undefined;
-    inferModeController: dat.GUI.Controller = undefined;
-    evalModeController: dat.GUI.Controller = undefined;
-    detRange = {'start': 0, 'end': 0};
-    evalRange = {'start': 0, 'end': 0};
 
     pointCloudScanMap: Points<BufferGeometry, Material | Material[]>[] = [];
     pointCloudScanNoGroundList: Points<BufferGeometry, Material | Material[]>[] = [];
@@ -281,13 +256,6 @@ class LabelTool3D {
             undo: this.undoOperation,
             i: -1,
             viewMode: "orthographic",
-            modeAL: 'None',
-            inferMode: 'None',
-            evalMode: 'None',
-            SelectNums: 0,
-            rangeEvalFrames: '',
-            rangeInferFrames: '',
-            QueryStrategy: 'CRB',
             show_projected_points: false,
             show_field_of_view: false,
             show_grid: false,
@@ -295,170 +263,12 @@ class LabelTool3D {
             hide_other_annotations: this.hideOtherAnnotations,
             select_all_copy_label_to_next_frame: this.selectAllCopyLabelToNextFrame,
             unselect_all_copy_label_to_next_frame: this.unselectAllCopyLabelToNextFrame,
-            show_detections: false,
             interpolation_mode: false,
             interpolate: this.interpolateSelectedBox,
             reset_all: this.labelTool.resetBoxes,
             skip_frames: 1,
-            weather_type: Utils.getSequenceByName(this.labelTool.availableSequences, this.labelTool.currentSequence).default_weather_type,
-            call_for_inference: this.aCallForInference
+            weather_type: Utils.getSequenceByName(this.labelTool.availableSequences, this.labelTool.currentSequence).default_weather_type
         };
-    }
-
-    aCallForEvaluation = async () => {
-        let files: string[];
-        if (this.evalRange['start'] === this.evalRange['end']){
-            // detection in current frame only
-            files = [this.labelTool.pointCloudFileNames[this.evalRange['start']]]
-        }
-        else {
-            files = arraySlice(this.labelTool.pointCloudFileNames, this.evalRange['start'], this.evalRange['end']+1);
-        }
-        const argsDict = {
-            filenames: files,
-            op: "evaluation",
-            mode: "evaluation",
-        };
-        const requestInit: RequestInit = this.requestInitFromJson(argsDict);
-        const response = await (await fetch("/connect-to-workstation",requestInit));
-        if (!response.ok){
-            throw new Error('HTTP Error! Could not connect to workstation for Inference.')
-        }
-
-        const responseData = await response.json();
-    }
-    aCallForInference = async() => {
-        let files: string[];
-        if (this.detRange['start'] === this.detRange['end']){
-            // detection in current frame only
-            files = [this.labelTool.pointCloudFileNames[this.detRange['start']]]
-        }
-        else {
-            // detections either in all frames or a range of frames.
-            files = arraySlice(this.labelTool.pointCloudFileNames, this.detRange['start'], this.detRange['end']+1);
-        }
-
-        // Filter out files that exist in detectionList
-        files = files.filter(file =>
-            !this.detectionList.some(item =>
-                Object.keys(item).some(key => key === file)
-            )
-        );
-        const argsDict = {
-            filenames: files,
-            op: "inference",
-            mode: "inference",
-        };
-        const requestInit: RequestInit = this.requestInitFromJson(argsDict);
-        const response = await (await fetch("/connect-to-workstation",requestInit));
-        if (!response.ok){
-            throw new Error('HTTP Error! Could not connect to workstation for Inference.')
-        }
-        const responseData = await response.json();
-
-        this.saveAnnotationsNow = false;
-        // Convert each element in this.responseData.preds to a JSON string
-        const stringifiedPreds = responseData.preds.map(element => JSON.stringify(element));
-
-        const annotationFiles = {
-            annotationFiles: stringifiedPreds,
-            fileNames: argsDict['filenames'],
-            dataset: this.labelTool.currentDataset,
-            lidarChannel: this.labelTool.currentLidarChannel,
-            sequence: this.labelTool.currentSequence
-        };
-        const requestInitSaveDets: RequestInit = this.requestInitFromJson(annotationFiles);
-        const responseSaveDets = await fetch('/save_annotations', requestInitSaveDets);
-        if (!responseSaveDets.ok) {
-            throw Error("Response status not OK")
-        }
-        this.loadAnnotations();
-        this.saveAnnotationsNow = true;
-
-        // const boxes = responseData.preds.boxes;
-        // const labels = responseData.preds.labels;
-        // const numDetections = boxes.length;
-        // for (let idx = 0; idx < numDetections; idx++) {
-        //     let params = this.labelTool.annotationObjects.getDefaultObject();
-        //     params.class = labels[idx];
-        //     params.original.class = labels[idx]
-        //     params.trackId = this.annotationObjects.getNextTrackID();
-        //     params.original.trackId = this.annotationObjects.getNextTrackID();
-        //
-        //     const euler = new Euler(boxes[idx][6], 0, 0);
-        //     params.rotationYaw = euler.z;
-        //     params.original.rotationYaw = euler.z;
-        //     params.rotationPitch = euler.y;
-        //     params.original.rotationPitch = euler.y;
-        //     params.rotationRoll = euler.x;
-        //     params.original.rotationRoll = euler.x;
-        //
-        //     params.x = boxes[idx][0];
-        //     params.original.x = boxes[idx][0];
-        //     params.y = boxes[idx][1];
-        //     params.original.y = boxes[idx][1];
-        //     params.z = boxes[idx][2];
-        //     params.original.z = boxes[idx][2];
-        //
-        //     let length;
-        //     let width;
-        //     let height;
-        //
-        //     length = Math.max(boxes[idx][3], 0.0001);
-        //     width = Math.max(boxes[idx][4], 0.0001);
-        //     height = Math.max(boxes[idx][5], 0.0001);
-        //
-        //     params.length = length;
-        //     params.original.length = length;
-        //     params.width = width;
-        //     params.original.width = width;
-        //     params.height = height;
-        //     params.original.height = height;
-        //
-        //     params.fileIndex = this.labelTool.currentFrameIndex;
-        //
-        //     let objectClassIdx = this.annotationClasses.getIndexByObjectClass(labels[idx]);
-        //     let defaultAttributes = this.annotationObjects.getDefaultAttributesByClassIdx(objectClassIdx);
-        //     params.attributes = defaultAttributes;
-        //
-        //     this.annotationObjects.set(this.annotationObjects.__insertIndex, params);
-        //     this.annotationObjects.__insertIndex++;
-        // }
-        // this.annotationObjects.__insertIndex = 0;
-    }
-
-
-    aCallForActiveLearning = async() => {
-        console.log("this.parameters.modeAL: ", this.parameters.modeAL);
-        console.log("number of frames to selection: ", this.parameters.SelectNums);
-
-        const opMap = {
-            'Active Train on Latest Data': 'active_train_latest',
-            'Active Train on All Data': 'active_train_all',
-            'Query Data to Label': 'query_only',
-            'Train Model on All Data': 'train_all_only',
-            'Train Model on Latest Data': 'train_latest_only',
-        };
-
-        const queryMap = {
-            'Continuous': 'tCRB',
-            'Random': 'CRB'
-        }
-
-        const argsDict = {
-            'mode': 'AL',
-            'op': opMap[this.parameters.modeAL],
-            'N_select': this.parameters.SelectNums,
-            'query': queryMap[this.parameters.QueryStrategy],
-        }
-        const requestInit: RequestInit = this.requestInitFromJson(argsDict);
-        const response = await (await fetch("/connect-to-workstation",requestInit));
-
-        if (!response.ok){
-            throw new Error('HTTP Error! Could not connect to workstation for Inference.')
-        }
-
-        const responseData = await response.json();
     }
 
     //TODO: this is just a testing method
@@ -610,11 +420,13 @@ class LabelTool3D {
             let allCheckboxes = $(":checkbox");
 
             let chooseSequenceDropDownController;
+            let chooseCameraChannelDropDownController;
             let currentDatasetDropDownController = this.guiOptions.add(this.labelTool, 'currentDataset', this.labelTool.datasetArray).name("Choose Dataset").listen();
 
             currentDatasetDropDownController.onChange((value) => {
                 this.changeDataset(value);
                 chooseSequenceDropDownController = chooseSequenceDropDownController.options(this.labelTool.sequenceArray);
+                chooseCameraChannelDropDownController = chooseCameraChannelDropDownController.options(this.labelTool.cameraChannelNames);
                 let allCheckboxes = $(":checkbox");
                 // this.hideMasterViews();
             });
@@ -623,6 +435,15 @@ class LabelTool3D {
             chooseSequenceDropDownController.onChange((value) => {
                 this.changeSequence(value);
                 // this.hideMasterViews();
+            });
+
+            // Only one camera channel is annotated at a time: pick it here, then the image
+            // panel loads from images_{channel}/ and annotations from annotations_{channel}/
+            // (see FileOperations), while the point cloud/HD map stay exactly as they were.
+            chooseCameraChannelDropDownController = this.guiOptions.add(this.labelTool, 'selectCameraChannelName', this.labelTool.cameraChannelNames).name("Choose Camera Channel").listen();
+            chooseCameraChannelDropDownController.onChange((value) => {
+                console.log("chooseCameraChannelDropDownController: ", value);
+                this.labelTool.changeCameraChannel(value);
             });
 
 
@@ -727,7 +548,6 @@ class LabelTool3D {
             const parameters = {
                 selectAllCopyLabelToNextFrame: this.parameters.select_all_copy_label_to_next_frame,
                 unselectAllCopyLabelToNextFrame: this.parameters.unselect_all_copy_label_to_next_frame,
-                aCallForInference: this.parameters.call_for_inference,
                 annotationObjects: this.annotationObjects,
                 labelTool: this.labelTool
             }
@@ -801,104 +621,6 @@ class LabelTool3D {
                 this.interpolateBtn.domElement.id = 'interpolate-btn';
                 this.disableInterpolationBtn();
             }
-
-            // TODO: proannoV2
-            this.inferModeController = this.guiOptions.add(this.parameters, 'inferMode', inferenceOptionsArray).name("Generate Detections");
-            const rangeInferFramesBox = this.guiOptions.add(this.parameters, 'rangeInferFrames').name('Range of Frames For Detections:');
-            rangeInferFramesBox.domElement.parentElement.parentElement.style.display = 'none';
-            this.inferModeController.onChange((inferValue) => {
-                if (inferValue === 'Detections In Frame Range'){
-                    rangeInferFramesBox.domElement.parentElement.parentElement.style.display = '';
-                    rangeInferFramesBox.onChange((rangeVal) => {
-                        const startNum = parseInt(rangeVal.split('-')[0], 10);
-                        const endNum = parseInt(rangeVal.split('-')[1], 10);
-                        if (startNum >= 0 && endNum < this.labelTool.pointCloudFileNames.length){
-                            this.detRange['start'] = startNum;
-                            this.detRange['end'] = endNum;
-                            this.aCallForInference();
-                        }
-                    });
-                }
-                else if (inferValue === 'Detections All Frames') {
-                    this.detRange['start'] = 0;
-                    this.detRange['end'] = this.labelTool.pointCloudFileNames.length - 1;
-                    this.aCallForInference();
-                }
-                else if (inferValue === 'Detections Current Frame') {
-                    this.detRange['start'] = this.labelTool.currentFrameIndex;
-                    this.detRange['end'] = this.labelTool.currentFrameIndex;
-                    this.aCallForInference();
-                }
-            });
-
-            this.evalModeController = this.guiOptions.add(this.parameters, 'evalMode', evaluationOptionsArray).name('Evaluate Detections');
-            const rangeEvalFramesBox = this.guiOptions.add(this.parameters, 'rangeEvalFrames').name('Range of Frames to Evaluate:');
-            rangeEvalFramesBox.domElement.parentElement.parentElement.style.display = 'none';
-            this.evalModeController.onChange((evalValue) => {
-                if (evalValue === 'Evaluate In Frame Range') {
-                    rangeEvalFramesBox.domElement.parentElement.parentElement.style.display = '';
-                    rangeEvalFramesBox.onChange((rangeValue) => {
-                       const startNum = parseInt(rangeValue.split('-')[0], 10);
-                       const endNum = parseInt(rangeValue.split('-')[1], 10);
-                       if (startNum >= 0 && endNum < this.labelTool.pointCloudFileNames.length ){
-                           this.evalRange['start'] = startNum;
-                           this.evalRange['end'] = endNum;
-                           this.aCallForEvaluation();
-                       }
-                    });
-                }
-                else if (evalValue === 'Evaluate All Frames') {
-                    this.evalRange['start'] = 0;
-                    this.evalRange['end'] = this.labelTool.pointCloudFileNames.length - 1;
-                    this.aCallForEvaluation();
-                }
-                else if (evalValue === 'Evaluate Current Frame') {
-                    this.evalRange['start'] = this.labelTool.currentFrameIndex;
-                    this.evalRange['end'] = this.labelTool.currentFrameIndex;
-                    this.aCallForEvaluation();
-                }
-                else {
-                    rangeEvalFramesBox.domElement.parentElement.parentElement.style.display = 'none';
-                    this.aCallForEvaluation();
-                }
-            });
-
-
-            this.modeALcontroller = this.guiOptions.add(this.parameters, 'modeAL', activeLearningOptionsArray).name("Active Learning");
-            const queryStrategyBox = this.guiOptions.add(this.parameters, 'QueryStrategy', queryStrategyOptions).name('Query Strategy:');
-            queryStrategyBox.domElement.parentElement.parentElement.style.display = 'none';
-
-            const numQueryFramesBox = this.guiOptions.add(this.parameters, 'SelectNums').name('Number of Frames to Query:');
-            numQueryFramesBox.domElement.parentElement.parentElement.style.display = 'none';
-
-            this.modeALcontroller.onChange((valueAL) => {
-                if (valueAL === 'Active Train on Latest Data' ||
-                    valueAL === 'Active Train on All Data' ||
-                    valueAL === 'Query Data to Label') {
-                    queryStrategyBox.domElement.parentElement.parentElement.style.display = '';
-
-                    queryStrategyBox.onChange((queryVal) => {
-                        numQueryFramesBox.domElement.parentElement.parentElement.style.display = '';
-                        numQueryFramesBox.onChange((selectValue) => {
-                            this.parameters.SelectNums = selectValue;
-                            if (this.parameters.SelectNums > 0) {
-                                this.aCallForActiveLearning();
-                            }
-                            else {
-                                console.error("YOU HAVE TO ENTER THE NUMBER OF FRAMES YOU WANT TO SELECT FROM LABELING NEXT!");
-                            }
-                        });
-                    });
-                }
-                else if (valueAL === 'Train Model on All Data' ||
-                            valueAL === 'Train Model on Latest Data' ||
-                            valueAL === 'None') {
-                    numQueryFramesBox.domElement.parentElement.parentElement.style.display = 'none';
-                    queryStrategyBox.domElement.parentElement.parentElement.style.display = 'none';
-                    this.parameters.SelectNums = 0;
-                    this.aCallForActiveLearning();
-                }
-            });
 
 
             this.guiOptions.add(this.parameters, 'reset_all').name("Reset all");
@@ -2316,6 +2038,7 @@ class LabelTool3D {
             annotationFiles: [allAnnotationFiles[currentFrameIndex]],
             fileNames: [this.labelTool.annotationFileNames[currentFrameIndex]],
             dataset: this.labelTool.currentDataset,
+            cameraChannel: this.labelTool.currentCameraChannel['channel'],
             lidarChannel: this.labelTool.currentLidarChannel,
             sequence: this.labelTool.currentSequence
         };

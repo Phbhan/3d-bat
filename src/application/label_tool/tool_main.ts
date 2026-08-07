@@ -19,21 +19,6 @@ import {CanvasRenderer} from "openfl";
 export const viewModeOptionsArray = ['orthographic', 'prespective'] as const;
 export type ViewModeOption = typeof viewModeOptionsArray[number];
 
-// TODO: AL/inference types
-export const activeLearningOptionsArray = ['Active Train on Latest Data',
-                                              'Active Train on All Data',
-                                              'Query Data to Label',
-                                              'Train Model on All Data',
-                                              'Train Model on Latest Data',
-                                              'None'];
-export type ActiveLearninOption = typeof  activeLearningOptionsArray[number];
-export const queryStrategyOptions = ['Continuous', 'Random'];
-export type QueryOption = typeof  queryStrategyOptions[number];
-export const inferenceOptionsArray = ['Detections All Frames', 'Detections Current Frame', 'Detections In Frame Range', 'None'];
-export type InferOption = typeof inferenceOptionsArray[number];
-export const evaluationOptionsArray = ['Evaluate All Frames', 'Evaluate Current Frame', 'Evaluate In Frame Range', 'None'];
-export type EvalOption = typeof  evaluationOptionsArray[number];
-
 const frameAnnotationTypeArray = ['continuous_sequence', 'random_frame'] as const;
 export type FrameAnnotationType = typeof frameAnnotationTypeArray[number];
 
@@ -56,9 +41,19 @@ class LabelTool {
     sequenceArray: string[] = [];
     numFrames: number;
 
+    // All camera channels available for the current dataset, straight from config.json.
+    // Used to populate the "Choose Camera Channel" dropdown.
+    allCameraChannels: any[] = [];
+    cameraChannelNames: string[] = [];
+    // cameraChannels always holds just the single ACTIVE channel (length 0 or 1).
+    // Kept as an array (rather than switching to a lone object) so the existing
+    // image-loading/projection code, which was written to loop over N channels,
+    // keeps working unchanged when N is always 1.
     cameraChannels: any[] = []; // Consider using a more specific type than 'any'
     lidarChannels: any[] = []; // Consider using a more specific type than 'any'
-    currentCameraChannel = "";
+    currentCameraChannel: any = undefined;
+    currentCameraChannelName = "";
+    selectCameraChannelName = "";
     currentLidarChannel = "";
 
     classes: any[] = []; // Consider using a more specific type than 'any'
@@ -173,14 +168,35 @@ class LabelTool {
         this.positionLidar = this.config.datasets[this.currentDatasetIdx].position_lidar;
 
         this.lidarChannels = this.config.datasets[this.currentDatasetIdx].lidar_channels;
-        this.cameraChannels = this.config.datasets[this.currentDatasetIdx].camera_channels;
         if (this.lidarChannels && this.lidarChannels.length > 0) {
             this.currentLidarChannel = this.lidarChannels[0];
         } else {
             console.warn("No lidar channels available. Using empty point cloud.");
             this.currentLidarChannel = ""; // Set to an empty string or a default value
         }
-        this.currentCameraChannel = this.config.datasets[this.currentDatasetIdx].camera_channels[0];
+
+        // Only one camera channel is ever active/annotated at a time. allCameraChannels
+        // holds every channel this dataset offers (for the "Choose Camera Channel"
+        // dropdown); cameraChannels is narrowed down to just the active one so all the
+        // existing per-channel image/projection code keeps working unmodified.
+        this.allCameraChannels = this.config.datasets[this.currentDatasetIdx].camera_channels ?? [];
+        this.cameraChannelNames = this.allCameraChannels.map((c: any) => c.channel);
+        if (this.allCameraChannels.length > 0) {
+            // Keep whatever channel was already selected if the new dataset still offers
+            // it (e.g. re-running loadConfig after changeSequence), otherwise default to
+            // the first channel in the list.
+            const keepName = this.cameraChannelNames.includes(this.currentCameraChannelName)
+                ? this.currentCameraChannelName
+                : this.cameraChannelNames[0];
+            this.currentCameraChannelName = keepName;
+            this.currentCameraChannel = this.allCameraChannels[this.cameraChannelNames.indexOf(keepName)];
+            this.cameraChannels = [this.currentCameraChannel];
+        } else {
+            console.warn("No camera channels available.");
+            this.currentCameraChannelName = "";
+            this.currentCameraChannel = undefined;
+            this.cameraChannels = [];
+        }
 
         this.numFrames = this.config.datasets[this.currentDatasetIdx].num_frames;
 
@@ -323,11 +339,14 @@ class LabelTool {
 
     initCameraWindows() {
 
+        // Remove only the previous image panel(s) by id, not the whole wrapper — the
+        // wrapper also holds #canvas3d, and wiping it would tear the point cloud/HD map
+        // out of the DOM when this runs again on a camera channel switch.
+        $("#label-tool-wrapper > div[id^='image-']").remove();
+
         for (let i = 0; i < this.cameraChannels.length; i++) {
             this.labelToolImage.canvasParamsArray.push({});
         }
-
-        $("#label-tool-wrapper").empty();
 
         let imageContainer;
         imageContainer = $("#label-tool-wrapper");
@@ -338,7 +357,7 @@ class LabelTool {
             console.log("this.canvasSize: ", this.canvasSize);
             console.log("this.originalImageSize: ", this.originalImageSize);
 
-            this.imageScale[i] *= this.canvasSize[0] / this.originalImageSize[0];
+            this.imageScale[i] = this.canvasSize[0] / this.originalImageSize[0];
             console.log("this.imageScale: ", this.imageScale);
             
             this.currentImageArray[i] = {
@@ -369,7 +388,7 @@ class LabelTool {
                     $("#" + id).css("width", imageWidth);
                     $("#" + id).css("height", imageHeight);
 
-                    canvasElem = imageContainer["0"].children[channelIdx];
+                    canvasElem = document.getElementById(id) as HTMLCanvasElement;
                     this.labelToolImage.canvasArray.push(canvasElem);
 
                 }
@@ -397,6 +416,7 @@ class LabelTool {
     }
 
     loadImageData() {
+        console.log("this.labelToolImage.imageArrayAll.length: ", this.labelToolImage.imageArrayAll.length)
         if(this.labelToolImage.imageArrayAll.length == 0)
         {
             for (let i = 0; i < this.numFrames; i++) {
@@ -409,7 +429,7 @@ class LabelTool {
                 this.labelToolImage.imageArrayAll.push(this.labelToolImage.imageArray);
             }
         }
-
+        console.log("this.cameraChannels: ", this.cameraChannels)
         for (let i = 0; i < this.cameraChannels.length; i++) {
             this.labelToolImage.imageArrayAll[this.currentFrameIndex][i].toBack();
 
@@ -921,6 +941,92 @@ class LabelTool {
         this.labelToolImage.imageWidthOriginal = -1;
 
         $(".frame-selector__frames").empty();
+    }
+
+    // Like resetTool(), but for switching the active camera channel: clears out
+    // annotation-derived state (boxes, sprites, GUI folders, image canvases) so the new
+    // channel's own annotation set loads cleanly, while leaving the point cloud and HD
+    // map — which are shared across every camera channel — untouched in the scene.
+    private resetForCameraChannelSwitch() {
+        for (let i = this.labelTool3D.scene.children.length - 1; i >= 0; i--) {
+            let obj = this.labelTool3D.scene.children[i];
+            if (obj.name && (obj.name.startsWith('cube-') || obj.name.startsWith('sprite-'))) {
+                this.labelTool3D.scene.remove(obj);
+            }
+        }
+
+        this.currentFrameIndex = 0;
+        this.fileNames = [];
+        this.imageFileNames = [];
+        this.annotationFileNames = [];
+        this.cubeArray = [];
+
+        const frameZeroObjects = this.annotationObjects.contents[this.currentFrameIndex] ?? [];
+        for (let i = 0; i < frameZeroObjects.length; i++) {
+            let annotationObj = frameZeroObjects[i];
+            this.labelTool3D.guiOptions.removeFolder(annotationObj["class"] + ' ' + annotationObj["trackId"]);
+        }
+
+        this.annotationObjects.contents = [];
+        $(".class-tooltip").remove();
+        this.spriteArray = [];
+        this.labelTool3D.selectedMesh = undefined;
+
+        this.annotationObjects.annotatedWeatherTypes = [];
+        for (let i = 0; i < this.numFrames; i++) {
+            this.cubeArray.push([]);
+            this.spriteArray.push([]);
+            this.annotationObjects.contents.push([]);
+        }
+
+        this.emptyAllFolders();
+
+        let classPickerElem = $('#class-picker ul li');
+        classPickerElem.css('background-color', '#353535');
+        $(classPickerElem[0]).css('background-color', '#525252');
+        classPickerElem.css('border-bottom', '0px');
+
+        this.imageCanvasInitialized = false;
+        this.labelToolImage.canvasArray = [];
+        this.labelToolImage.canvasParamsArray = [];
+        this.labelToolImage.paperArray = [];
+        this.labelToolImage.paperArrayAll = [];
+        this.labelToolImage.imageArray = [];
+        this.labelToolImage.imageHeightOriginal = -1;
+        this.labelToolImage.imageWidthOriginal = -1;
+
+        $(".frame-selector__frames").empty();
+    }
+
+    // Switches the single active camera channel: reloads that channel's own images
+    // (from images_{channel}/) and annotations (from annotations_{channel}/, via
+    // FileOperations — see the note in file_operations.ts), while leaving the point
+    // cloud and HD map exactly as they were since those are shared across channels.
+    changeCameraChannel(channelName: string) {
+        if (!channelName || channelName === this.currentCameraChannelName) {
+            return;
+        }
+        const channelIdx = this.cameraChannelNames.indexOf(channelName);
+        if (channelIdx === -1) {
+            console.warn(`Camera channel "${channelName}" not found in config.`);
+            return;
+        }
+
+        this.currentCameraChannelName = channelName;
+        this.currentCameraChannel = this.allCameraChannels[channelIdx];
+        this.cameraChannels = [this.currentCameraChannel];
+        this.labelToolImage.imageArrayAll = []
+
+        this.resetForCameraChannelSwitch();
+        this.setFileNames();
+        this.initFrameSelector();
+        this.initCameraWindows();
+        this.loadImageData();
+        this.labelTool3D.loadAnnotations();
+        this.labelToolImage.draw2DProjections();
+
+        $("#left-btn").css("left", 0);
+        $("#class-picker").css("left", 10);
     }
 
     private emptyAllFolders() {
