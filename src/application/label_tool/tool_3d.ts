@@ -1527,7 +1527,7 @@ class LabelTool3D {
 
         let folderSize = bboxFolders.__folders['Size'] ?? bboxFolders.addFolder('Size');
         let cubeLength = folderSize.add(bbox, 'length').name("length").min(0.3).max(20).step(0.01).listen();
-        let cubeWidth = folderSize.add(bbox, 'width').name("width").min(0.3).max(10).step(0.01).listen();
+        let cubeWidth = folderSize.add(bbox, 'width').name("width").min(0.3).max(30).step(0.01).listen();
         let cubeHeight = folderSize.add(bbox, 'height').name("height").min(0.3).max(10).step(0.01).listen();
         folderSize.close();
         this.folderSizeArray.push(folderSize);
@@ -2593,7 +2593,7 @@ class LabelTool3D {
             side: DoubleSide,
             morphTargets: false
         });
-        const cubeMaterials = [cubeMaterialFrontSide, cubeMaterialSide, cubeMaterialSide, cubeMaterialSide, cubeMaterialSide, cubeMaterialSide];
+        const cubeMaterials = [cubeMaterialSide, cubeMaterialSide, cubeMaterialSide, cubeMaterialFrontSide, cubeMaterialSide, cubeMaterialSide];
         // let faceMaterial = new MeshFaceMaterial(cubeMaterials);
         // let cubeMesh = new Mesh(cubeGeometry, faceMaterial);
         // TODO: check if Mesh can take an array of materials
@@ -2619,16 +2619,16 @@ class LabelTool3D {
 
         // Direction arrow: cone on the front face showing which way the box points.
         // "length" (scale.x) is the forward axis (see cubeLength.onChange), so the
-        // arrow sits at local x=0.5 (front face) and is rotated to point along +x.
+        // arrow sits at local x (front face) and is rotated to point along +x.
         // Local position scales with the parent automatically, so it stays glued to
         // the front face as length/width/height change; the counter-scale below only
         // keeps the cone's *shape* from stretching, using the scale at creation time.
         const arrowGeometry = new ConeBufferGeometry(0.15, 0.8, 8);
-        arrowGeometry.rotateZ(-Math.PI / 2);
+        arrowGeometry.rotateZ(0);
         const arrowMaterial = new MeshBasicMaterial({color: 0xffff00});
         const directionArrow = new Mesh(arrowGeometry, arrowMaterial);
         directionArrow.name = "direction-arrow";
-        directionArrow.position.set(0.7, 0, 0.5);
+        directionArrow.position.set(0, 0, 1);
         directionArrow.scale.set(1 / cubeMesh.scale.x, 1 / cubeMesh.scale.y, 1 / cubeMesh.scale.z);
         cubeMesh.add(directionArrow);
 
