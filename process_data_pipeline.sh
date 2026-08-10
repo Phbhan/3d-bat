@@ -74,7 +74,6 @@ python scripts/preprocess_anns.py \
         --annotations_dir $DATA_PROCESSED_PATH/annotations \
         --rename \
         --modify-box \
-        --x-offset -0.493 
-
+        --x-offset -1.403
 python scripts/create_file_name_list.py \
     --input_folder_path_drive $DATA_PROCESSED_PATH

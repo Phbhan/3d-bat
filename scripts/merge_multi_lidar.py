@@ -3,12 +3,19 @@
 Merge multi-LiDAR point clouds into the ego/vehicle frame.
 
 Concatenation logic matches `05_pointcloud_concat_and_visualize.py`:
-  - Each sensor's points are transformed into ego frame via T @ [x,y,z,1]^T,
-    where T is the sensor's 4x4 sensor->ego extrinsic matrix.
+  - Each sensor's points are transformed into the ego frame via
+    T @ [x,y,z,1]^T, where T is that sensor's 4x4 sensor->ego extrinsic
+    matrix (loaded from --extr; supports 4x4, flattened 16-value, and
+    legacy 6-value [tx,ty,tz,roll,pitch,yaw] formats). This is applied to
+    EVERY sensor, including LIDAR_TOP -- there is no implicit "LIDAR_TOP
+    frame == ego frame" assumption anymore.
   - LIDAR_E_* (edge) sensors additionally get a cylindrical ROI filter
     (radius CYLINDER_RADIUS around x_center=0.910, z in [MIN_Z_SIDE, MAX_Z_SIDE])
-    to drop vehicle self-returns / near-field clutter. LIDAR_TOP is untouched.
-  - LIDAR_AT_F is intentionally excluded (not in ALLOWED_LIDARS).
+    to drop vehicle self-returns / near-field clutter, evaluated in the
+    already-transformed ego-frame coordinates. LIDAR_TOP is not filtered.
+  - --origin optionally applies an ADDITIONAL fixed translation on top of
+    the true extrinsic-derived ego frame (e.g. to re-center at the vehicle
+    center or rear axle). Default "lidar_top" applies no extra shift.
 
 Output per merged frame:
   - <out_dir_pcd>/<token>.pcd   xyz-only binary PCD (matches the strict
@@ -35,6 +42,8 @@ import os
 # Config
 # -------------------------
 MAX_TIME_DIFF = 0.07
+# Used only for legacy 6-value [tx, ty, tz, roll, pitch, yaw] extrinsics
+# (translation is stored in mm in that format, hence the 0.001 scale).
 TRANS_SCALE = 0.001
 TARGET_SCALES = np.array([0.01, 0.01, 0.01], dtype=np.float64)
 TARGET_OFFSETS = np.array([0.0, 0.0, 0.0], dtype=np.float64)
@@ -48,8 +57,7 @@ CYLINDER_X_CENTER = 0.910
 MIN_Z_SIDE = -0.5
 MAX_Z_SIDE = 2.0
 
-# Only these 5 lidars are used: the 4 "E" (edge) lidars + the top lidar.
-# LIDAR_AT_F is deliberately excluded, same as the reference.
+
 LIDAR_IDX = {
     "LIDAR_E_F":  0,
     "LIDAR_E_L":  1,
@@ -87,12 +95,7 @@ SHOW_COORDINATE_FRAME = True
 # Vehicle-center origin offset
 # -------------------------
 CENTER_ORIGIN_OFFSET = np.array(
-    [-0.493, 0.0, +1.889],
-    dtype=np.float64,
-)
-
-BACK_ORIGIN_OFFSET = np.array(
-    [+0.91, 0.0, +1.889],
+    [-1.403, 0, 0],
     dtype=np.float64,
 )
 
@@ -107,6 +110,43 @@ def ensure_dir(p: Path) -> None:
 def load_extrinsics(path: str) -> Dict:
     with open(path, "r") as f:
         return json.load(f)
+
+
+def get_transform_matrix(extrinsics: Dict, sensor_name: str) -> np.ndarray:
+    """
+    Return a sensor-to-ego 4x4 homogeneous transform matrix for sensor_name.
+
+    Accepts three JSON formats:
+      - a 4x4 nested list/array
+      - 16 flattened values
+      - legacy 6 values [tx, ty, tz, roll, pitch, yaw] (translation in mm,
+        rotation in degrees, applied as intrinsic XYZ Euler angles)
+    """
+    if sensor_name not in extrinsics:
+        raise KeyError(f"Missing extrinsic for sensor: {sensor_name}")
+
+    arr = np.asarray(extrinsics[sensor_name], dtype=np.float64)
+
+    if arr.shape == (4, 4):
+        return arr
+
+    flat = arr.reshape(-1)
+    if flat.size == 16:
+        return flat.reshape(4, 4)
+
+    if flat.size == 6:
+        tx, ty, tz, roll, pitch, yaw = flat.tolist()
+        transform = np.eye(4, dtype=np.float64)
+        transform[:3, :3] = R.from_euler(
+            "xyz", [roll, pitch, yaw], degrees=True
+        ).as_matrix()
+        transform[:3, 3] = np.array([tx, ty, tz], dtype=np.float64) * TRANS_SCALE
+        return transform
+
+    raise ValueError(
+        f"Unsupported extrinsic format for {sensor_name}: shape={arr.shape}. "
+        "Expected a 4x4 matrix, 16 flattened values, or 6 legacy values."
+    )
 
 
 def ts_ns_from_stem(stem: str) -> int:
@@ -146,33 +186,51 @@ def nearest_by_time(index: List[Tuple[int, Path]], t_ns: int) -> Tuple[int, Path
             hi = mid
     return index[lo] if abs(index[lo][0] - t_ns) <= abs(index[hi][0] - t_ns) else index[hi]
 
-def filter_points(
+def transform_points(
+    transform: np.ndarray,
     x: np.ndarray,
     y: np.ndarray,
     z: np.ndarray,
     is_side: bool,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Filter LiDAR points.
+    Transform raw sensor-frame points into the ego frame via T @ [x,y,z,1]^T,
+    then (for LIDAR_E_* sensors) apply the cylindrical ROI filter in the
+    resulting ego-frame coordinates.
 
-    For LIDAR_E_* sensors, apply the cylindrical ROI filter.
-    For other sensors, keep all points.
+    Args:
+        transform: (4, 4) sensor-to-ego homogeneous matrix.
+        x, y, z: raw points in the sensor's own local frame.
+        is_side: True for LIDAR_E_* sensors -> apply the cylindrical filter.
+                 False (e.g. LIDAR_TOP) -> keep all points.
 
     Returns:
-        xyz: Filtered points with shape (N, 3).
+        xyz: Transformed (and possibly filtered) points, shape (N, 3), in
+             the ego frame.
         keep: Boolean mask applied to the original points.
     """
-    keep = np.ones(x.shape[0], dtype=bool)
+    homogeneous = np.vstack(
+        (
+            np.asarray(x, dtype=np.float64),
+            np.asarray(y, dtype=np.float64),
+            np.asarray(z, dtype=np.float64),
+            np.ones_like(x, dtype=np.float64),
+        )
+    )
+    transformed = transform @ homogeneous
+    xt, yt, zt = transformed[0], transformed[1], transformed[2]
+
+    keep = np.ones(xt.shape[0], dtype=bool)
 
     if is_side:
-        x_shift = x - CYLINDER_X_CENTER
+        x_shift = xt - CYLINDER_X_CENTER
         keep = (
-            (x_shift**2 + y**2 <= CYLINDER_RADIUS**2)
-            & (z >= MIN_Z_SIDE)
-            & (z <= MAX_Z_SIDE)
+            (x_shift**2 + yt**2 <= CYLINDER_RADIUS**2)
+            & (zt >= MIN_Z_SIDE)
+            & (zt <= MAX_Z_SIDE)
         )
 
-    xyz = np.column_stack((x[keep], y[keep], z[keep]))
+    xyz = np.column_stack((xt[keep], yt[keep], zt[keep]))
 
     return xyz, keep
 
@@ -182,29 +240,30 @@ def transform_origin(
     origin: str,
 ) -> np.ndarray:
     """
-    Transform points from the LIDAR_TOP-origin coordinate system
-    to the requested origin.
+    Apply an OPTIONAL additional translation on top of the true ego frame
+    (points already transformed via the sensor's extrinsic).
 
     Args:
-        xyz: (N, 3) point cloud.
+        xyz: (N, 3) point cloud, already in the ego frame.
         origin:
-            "lidar_top" -> no change.
-            "center"    -> shift origin to vehicle center using
-                           CENTER_ORIGIN_OFFSET meters.
-            "back"    -> shift origin to vehicle center rear wheel using
-                           BACK_ORIGIN_OFFSET meters.
+            "lidar_top" -> no extra shift; use the ego frame as defined
+                           directly by the extrinsics, i.e. the
+                           back/rear-axle origin (default).
+            "back"      -> alias for "lidar_top"/default. The extrinsics'
+                           ego frame IS the back/rear-axle origin already,
+                           so this is a no-op kept only for CLI backward
+                           compatibility.
+            "center"    -> additionally shift by CENTER_ORIGIN_OFFSET
+                           meters (back(ego) -> vehicle center).
 
     Returns:
-        (N, 3) transformed point cloud.
+        (N, 3) point cloud.
     """
-    if origin == "lidar_top":
+    if origin in ("lidar_top", "back"):
         return xyz
 
     if origin == "center":
         return xyz + CENTER_ORIGIN_OFFSET
-    
-    if origin == "back":
-        return xyz + BACK_ORIGIN_OFFSET
 
     raise ValueError(
         f"Unknown origin '{origin}'. "
@@ -319,7 +378,7 @@ def write_laz(filename: Path, points: np.ndarray, template_las: laspy.LasData):
 def merge_one_timestamp(
     t_ns: int,
     lidar_indexes: Dict[str, List[Tuple[int, Path]]],
-    extr: Dict,
+    transform_matrices: Dict[str, np.ndarray],
     out_pcd: Path,
     out_bin: Path,
     out_laz: Optional[Path] = None,
@@ -331,6 +390,12 @@ def merge_one_timestamp(
     Returns (wrote_ok, sensor_points) where sensor_points maps
     lidar_name -> transformed/filtered xyz (only populated if
     collect_sensor_points=True, e.g. for --visualize).
+
+    Each sensor's raw points are converted into the ego frame via its own
+    sensor-to-ego extrinsic (transform_matrices[lidar_name]) before the
+    cylindrical ROI filter (LIDAR_E_* only) and the optional --origin shift
+    are applied. LIDAR_TOP is transformed by its own extrinsic just like
+    every other sensor -- it is no longer treated as the ego frame itself.
     """
     merged: List[np.ndarray] = []
     sensor_points: Dict[str, np.ndarray] = {}
@@ -338,6 +403,11 @@ def merge_one_timestamp(
 
     for lidar_name, index in lidar_indexes.items():
         if lidar_name not in LIDAR_IDX or len(index) == 0:
+            continue
+
+        transform = transform_matrices.get(lidar_name)
+        if transform is None:
+            print(f"[WARN] Skip {lidar_name}: missing extrinsic")
             continue
 
         t_best, best_file = nearest_by_time(index, t_ns)
@@ -353,14 +423,19 @@ def merge_one_timestamp(
         y = np.asarray(las.y, dtype=np.float64)
         z = np.asarray(las.z, dtype=np.float64)
 
-        xyz, keep = filter_points(x, y, z, is_side=lidar_name.startswith("LIDAR_E_"))
+        # Sensor-frame -> ego-frame via T @ [x, y, z, 1]^T, then (for
+        # LIDAR_E_* only) the cylindrical ROI filter in ego coordinates.
+        xyz, keep = transform_points(
+            transform, x, y, z, is_side=lidar_name.startswith("LIDAR_E_")
+        )
 
         if xyz.size == 0:
             continue
 
         # --------------------------------------------------
-        # Change coordinate origin:
-        # LIDAR_TOP origin -> vehicle center origin
+        # Optional additional shift on top of the true ego frame,
+        # e.g. to re-center at the vehicle center or rear axle.
+        # "lidar_top" (default) applies no extra shift.
         # --------------------------------------------------
         xyz = transform_origin(xyz, origin)
 
@@ -540,12 +615,12 @@ def main():
         choices=["lidar_top", "center", "back"],
         default="lidar_top",
         help=(
-            "Output coordinate origin. "
-            "'lidar_top' keeps the original LIDAR_TOP origin. "
-            "'center' shifts points by [-0.493, 0.0, +1.889] meters "
-            "to use the vehicle center as origin."
-            "'back' shifts points by [[+0.91, 0.0, +1.889] meters "
-            "to use the vehicle center rear wheel as origin."
+            "Additional shift applied ON TOP of the true extrinsic-derived "
+            "ego frame. 'lidar_top' (default): no extra shift -- the ego "
+            "frame IS the back/rear-axle origin, as defined by the "
+            "extrinsics. 'back': no-op alias for the default, kept for "
+            "backward compatibility. 'center': shifts by "
+            "CENTER_ORIGIN_OFFSET meters (back-ego -> vehicle center)"
         ),
     )
     ap.add_argument("--max_dt", type=float, default=MAX_TIME_DIFF)
@@ -588,26 +663,36 @@ def main():
         if len(idx) > 0:
             lidar_indexes[lidar_name] = idx
 
+    transform_matrices: Dict[str, np.ndarray] = {}
+    for lidar_name in list(lidar_indexes.keys()):
+        try:
+            transform_matrices[lidar_name] = get_transform_matrix(extr, lidar_name)
+        except (KeyError, ValueError) as exc:
+            print(f"[WARN] {exc}")
+
     print("Lidars in use:", list(lidar_indexes.keys()))
+    print("Lidars with valid extrinsic:", list(transform_matrices.keys()))
     print("Output origin:", args.origin)
 
     if args.origin == "center":
         print(
-            "Center-origin offset: "
+            "Center-origin offset (back-ego -> center, PLACEHOLDER, "
+            "recalculate before trusting this output): "
             f"x={CENTER_ORIGIN_OFFSET[0]:+.3f} m, "
             f"y={CENTER_ORIGIN_OFFSET[1]:+.3f} m, "
             f"z={CENTER_ORIGIN_OFFSET[2]:+.3f} m"
         )
     elif args.origin == "back":
         print(
-            "Center-rear-wheel offset: "
-            f"x={BACK_ORIGIN_OFFSET[0]:+.3f} m, "
-            f"y={BACK_ORIGIN_OFFSET[1]:+.3f} m, "
-            f"z={BACK_ORIGIN_OFFSET[2]:+.3f} m"
+            "'back' is a no-op: the extrinsics' ego frame is already the "
+            "back/rear-axle origin by default."
         )
     
     if args.anchor not in lidar_indexes:
         raise RuntimeError(f"Anchor lidar {args.anchor} has no data. Available: {list(lidar_indexes.keys())}")
+
+    if args.anchor not in transform_matrices:
+        print(f"[WARN] Anchor {args.anchor} has no valid extrinsic; its points will be dropped from every merged frame.")
 
     anchor_index = lidar_indexes[args.anchor]
     print("len(anchor_index):", len(anchor_index))
@@ -627,7 +712,7 @@ def main():
             wrote, _ = merge_one_timestamp(
                 t_ns,
                 lidar_indexes,
-                extr,
+                transform_matrices,
                 out_pcd,
                 out_bin,
                 out_laz,
@@ -661,7 +746,7 @@ def main():
         _, sensor_points = merge_one_timestamp(
             target_ns,
             lidar_indexes,
-            extr,
+            transform_matrices,
             out_pcd=(
                 Path("/dev/null.pcd")
                 if not args.visualize_only

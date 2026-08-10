@@ -4,11 +4,68 @@ from pathlib import Path
 import argparse
 import json
 import re
+import shutil
+import math
 
+CAMERAS = {
+    "CAM_FRONT": lambda x, y: x >= 0 and math.sqrt(x*x + y*y) < 10, 
+    "CAM_FRONT_RIGHT": lambda x, y: x >= 0 and y <= 0 and math.sqrt(x*x + y*y) < 10,
+    "CAM_FRONT_LEFT": lambda x, y: x >= 0 and y >= 0 and math.sqrt(x*x + y*y) < 10,
+    "CAM_BACK": lambda x, y: x < 0 and math.sqrt(x*x + y*y) < 10,
+}
 
 # Box transformation:
 BOX_X_OFFSET = 0.0
 BOX_Z_VALUE = 0.0
+
+def split_annotations_by_camera(
+    annotation_dir: Path,
+    x_offset: float,
+    z_value: float,
+):
+    for cam_name, keep_fn in CAMERAS.items():
+
+        out_dir = annotation_dir.parent / f"annotations_{cam_name}"
+        
+        # Delete existing folder
+        if out_dir.exists():
+            shutil.rmtree(out_dir)
+            print(f"Deleted: {out_dir}")
+
+        # Create a new empty folder
+        out_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Created: {out_dir}")
+
+        for src_file in sorted(annotation_dir.glob("*.json")):
+
+            with open(src_file) as f:
+                data = json.load(f)
+
+            data["cam_pos"] = cam_name
+
+            new_labels = []
+
+            for label in data.get("labels", []):
+
+                location = label["box3d"]["location"]
+
+                x = float(location["x"])
+                y = float(location["y"])
+
+                location["x"] = x
+                location["y"] = y
+                location["z"] = z_value
+
+                if keep_fn(x + x_offset, y):
+                    new_labels.append(label)
+
+            data["labels"] = new_labels
+
+            dst = out_dir / src_file.name
+            with open(dst, "w") as f:
+                json.dump(data, f, indent=2)
+
+        print(f"{cam_name}: done")
 
 
 def rename_json_files(annotation_dir: Path):
@@ -34,12 +91,11 @@ def rename_json_files(annotation_dir: Path):
         if new_name == file_path.name:
             continue
 
-        if new_path.exists():
-            print(f"SKIP: {new_name} already exists")
-            continue
-
-        file_path.rename(new_path)
-        print(f"Renamed: {file_path.name} -> {new_name}")
+        if new_path.exists():  
+            file_path.replace(new_path)     
+        else:
+            file_path.rename(new_path)
+            print(f"Renamed: {file_path.name} -> {new_name}")
 
 
 def modify_box_annotations(
@@ -211,18 +267,29 @@ def main():
             f"Annotation directory does not exist: {annotation_dir}"
         )
 
-    # Modify boxes if requested.
-    if args.modify_box:
-        modify_box_annotations(
-            annotation_dir=annotation_dir,
-            x_offset=args.x_offset,
-            z_value=args.z_value,
-        )
+    split_annotations_by_camera(
+        annotation_dir,
+        args.x_offset,
+        args.z_value,
+    )
+    
+    for cam_name, keep_fn in CAMERAS.items():
+        annotation_dir_cam = annotation_dir.parent / f"annotations_{cam_name}"
 
-    # Rename files if requested.
-    if args.rename:
-        print("\n==== RENAMING JSON FILES ====")
-        rename_json_files(annotation_dir)
+        # Modify boxes if requested.
+        if args.modify_box:
+            modify_box_annotations(
+                annotation_dir=annotation_dir_cam,
+                x_offset=args.x_offset,
+                z_value=args.z_value,
+            )
+        
+        # Rename files if requested.
+        if args.rename:
+            print("\n==== RENAMING JSON FILES ====")
+            rename_json_files(annotation_dir_cam)
+        
+
 
 
 if __name__ == "__main__":
