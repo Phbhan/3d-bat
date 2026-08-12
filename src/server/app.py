@@ -4,7 +4,7 @@ from flask import Flask
 from flask import request
 from src.server.pre_annotate import predict_yaw
 from src.server.active_learning import pvrcnn_inference
-from src.od3d import calculate_projected_bounding_boxes, project_points
+from src.od3d import calculate_projected_bounding_box_edges, project_points
 from os import path
 import time
 
@@ -57,7 +57,7 @@ def project_bounding_box():
         channel_name = ch['channel']
         zoom_factor = ch.get('zoomFactor', 1.0)
         # Always returns list of length len(boxes)
-        result[channel_name] = calculate_projected_bounding_boxes(
+        result[channel_name] = calculate_projected_bounding_box_edges(
             boxes=boxes,
             coordinate_system=coordinate_system,
             zoom_factor=zoom_factor,

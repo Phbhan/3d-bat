@@ -165,7 +165,7 @@ class LabelToolImage{
             height: number;
             yaw: number
         }>
-    ): Promise<{ [channel: string]: Vector2[][] }> {
+    ): Promise<{ [channel: string]: (Vector2 | undefined)[][] }> {
     
         const timings: { [stage: string]: number } = {};
         const totalStart = performance.now();
@@ -230,7 +230,7 @@ class LabelToolImage{
         start = performance.now();
     
         const result: {
-            [channel: string]: number[][][]
+            [channel: string]: (number[] | null)[][]
         } = await response.json();
     
         timings["response.json"] = performance.now() - start;
@@ -241,17 +241,23 @@ class LabelToolImage{
         start = performance.now();
     
         const converted: {
-            [channel: string]: Vector2[][]
+            [channel: string]: (Vector2 | undefined)[][]
         } = {};
     
     
         for (const channel in result) {
-    
+
+            // Corners outside the camera's calibrated FOV come back as
+            // `null` (not a faithful [x,y] projection) instead of being
+            // silently folded into a distorted position. Map those to
+            // `undefined` so drawLine()'s existing
+            // `pointStart !== undefined && isFinite(...)` guard skips any
+            // line segment touching them, with no other changes needed.
             converted[channel] =
                 result[channel].map(
                     boxPoints =>
                         boxPoints.map(
-                            pt => new THREE.Vector2(
+                            pt => pt === null ? undefined : new THREE.Vector2(
                                 pt[0],
                                 pt[1]
                             )
@@ -292,23 +298,29 @@ class LabelToolImage{
         lineArray.push(this.drawLine(channelIdx, channelObj.projectedPoints[3], channelObj.projectedPoints[0], color, fileIndex)!);
 
         // draw line for orientation
-        let pointZero;
-        let pointOne;
-        let pointTwo;
-        let pointThree;
+        // corners 4-7 may be undefined if that corner fell outside the
+        // camera's calibrated FOV (see the null -> undefined mapping in
+        // projectBoundingBoxes above) — skip the orientation marker rather
+        // than throwing and losing the rest of the box's lines.
+        const orientationCorners = [
+            channelObj.projectedPoints[6],
+            channelObj.projectedPoints[7],
+            channelObj.projectedPoints[4],
+            channelObj.projectedPoints[5],
+        ];
+        if (orientationCorners.every(p => p !== undefined)) {
+            const pointZero = orientationCorners[0].clone();
+            const pointOne = orientationCorners[1].clone();
+            const pointTwo = orientationCorners[2].clone();
+            const pointThree = orientationCorners[3].clone();
 
-        pointZero = channelObj.projectedPoints[6].clone();
-        pointOne = channelObj.projectedPoints[7].clone();
-        pointTwo = channelObj.projectedPoints[4].clone();
-        pointThree = channelObj.projectedPoints[5].clone();
-
-
-        let startPoint = pointZero.add(pointThree.sub(pointZero).multiplyScalar(0.5));
-        let startPointCloned = startPoint.clone();
-        let helperPoint = pointOne.add(pointTwo.sub(pointOne).multiplyScalar(0.5));
-        let helperPointCloned = helperPoint.clone();
-        let endPoint = startPointCloned.add(helperPointCloned.sub(startPointCloned).multiplyScalar(0.2));
-        lineArray.push(this.drawLine(channelIdx, startPoint, endPoint, color, fileIndex)!);
+            let startPoint = pointZero.add(pointThree.sub(pointZero).multiplyScalar(0.5));
+            let startPointCloned = startPoint.clone();
+            let helperPoint = pointOne.add(pointTwo.sub(pointOne).multiplyScalar(0.5));
+            let helperPointCloned = helperPoint.clone();
+            let endPoint = startPointCloned.add(helperPointCloned.sub(startPointCloned).multiplyScalar(0.2));
+            lineArray.push(this.drawLine(channelIdx, startPoint, endPoint, color, fileIndex)!);
+        }
 
 
         // top four lines
@@ -608,11 +620,18 @@ class LabelToolImage{
         let color = this.annotationClasses.annotationClasses[newClass].color;
         // update color in all 6 channels
         for (let i = 0; i < annotation["channels"].length; i++) {
-            if (annotation["channels"][i]["lines"] !== undefined && annotation["channels"][i]["lines"][0] !== undefined) {
+            if (annotation["channels"][i]["lines"] !== undefined) {
                 for (let lineObj in annotation["channels"][i]["lines"]) {
                     if (annotation["channels"][i]["lines"].hasOwnProperty(lineObj)) {
                         const line = annotation["channels"][i]["lines"][lineObj];
-                        line.attr({stroke: color});
+                        // drawLine() returns undefined for any edge whose
+                        // endpoint(s) fell outside the camera's calibrated
+                        // FOV (see projectBoundingBoxes' null -> undefined
+                        // mapping) — a partially-clipped box will have a
+                        // mix of real lines and undefined slots here.
+                        if (line !== undefined) {
+                            line.attr({stroke: color});
+                        }
                     }
                 }
             }

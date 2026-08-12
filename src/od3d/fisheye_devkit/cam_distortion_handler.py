@@ -87,6 +87,53 @@ class DistortionModel:
             + 9.0 * coeffs[3] * t8
         )
 
+    def compute_theta_max(
+        self,
+        coeffs: torch.Tensor,
+        search_max: float = np.pi,
+        num_samples: int = 4096,
+    ) -> torch.Tensor:
+        """
+        Largest theta for which `apply_distortion` is still monotonically
+        increasing given the fitted `coeffs`.
+
+        The fisheye polynomial f(theta) = theta*(1 + k1*theta^2 + ... )
+        is only a valid, invertible mapping while f'(theta) > 0. Past that
+        point f can turn over and start decreasing, which means a ray far
+        outside the calibrated FOV can alias onto a small/near-center pixel
+        instead of projecting far off-frame. Callers should clamp theta to
+        this bound before calling apply_distortion, and treat rays with a
+        raw (unclamped) theta beyond this bound as outside the valid FOV.
+
+        Args:
+            coeffs: (4,) = [k1,k2,k3,k4]
+            search_max: upper bound of the angle range to search, in
+                radians. Defaults to pi (matches the theta clamp already
+                used in solve_distortion) since real fisheye lenses can
+                exceed a 180 deg FOV — i.e. theta from the optical axis
+                approaching pi/2 or beyond is not automatically invalid,
+                only the point past which the fitted polynomial itself
+                stops being monotonic is.
+            num_samples: resolution of the search grid.
+
+        Returns:
+            0-d tensor: theta_max, in radians.
+        """
+        thetas = torch.linspace(
+            0.0, search_max, num_samples,
+            device=coeffs.device, dtype=coeffs.dtype,
+        )
+        deriv = self.distortion_derivative(thetas, coeffs)
+
+        invalid = (deriv <= 0).nonzero(as_tuple=True)[0]
+        if invalid.numel() == 0:
+            return thetas[-1]
+
+        # Back off one sample so theta_max is still comfortably monotonic.
+        first_invalid = invalid[0]
+        idx = torch.clamp(first_invalid - 1, min=0)
+        return thetas[idx]
+
     def solve_distortion(
         self,
         cdist: torch.Tensor,

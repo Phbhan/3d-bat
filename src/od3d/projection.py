@@ -13,7 +13,7 @@ Supports batched projection of multiple boxes in a single call.
 """
 import numpy as np
 import torch
-from src.od3d.od3d import project_bbox3d
+from src.od3d.od3d import project_bbox3d, fisheye_cams
 
 
 def _rotation_matrix_z(yaw: float) -> np.ndarray:
@@ -97,8 +97,20 @@ def calculate_projected_bounding_box(
     """
     Project a single 3D box into one camera channel.
     Thin wrapper around the batched path so existing single-box callers keep working.
+
+    Returns:
+        tuple:
+            - points: the 8 corner points as [[x, y], ...] (Python list),
+              scaled by zoom_factor.
+            - valid_mask: list of 8 bools. True where that corner's raw
+              pixel coordinates are trustworthy (its true angle from the
+              optical axis is inside the lens's calibrated FOV). A corner
+              marked False should not be connected to another corner using
+              its raw pixel value — see `calculate_projected_bounding_box_edges`
+              for a version that clips the box outline at the FOV boundary
+              instead of returning unreliable corners.
     """
-    results = calculate_projected_bounding_boxes(
+    points, valid_masks = calculate_projected_bounding_boxes(
         boxes=[{
             "x": x_pos, "y": y_pos, "z": z_pos,
             "length": length, "width": width, "height": height, "yaw": yaw,
@@ -108,7 +120,7 @@ def calculate_projected_bounding_box(
         channel_name=channel_name,
     )
     # Always return the first (and only) element of the array
-    return results[0]
+    return points[0], valid_masks[0]
 
 
 def calculate_projected_bounding_boxes(
@@ -129,13 +141,23 @@ def calculate_projected_bounding_boxes(
         channel_name: key into fisheye_cams, e.g. "CAM_FRONT"
 
     Returns:
-        list of length N, where each element is the 8 corner points as
-        [[x, y], ...] (Python lists).  Always a list, even when N == 1.
+        tuple:
+            - points: list of length N, where each element is the 8 corner
+              points as [[x, y], ...] (Python lists), scaled by
+              zoom_factor. Always a list, even when N == 1.
+            - valid_mask: list of length N, where each element is 8 bools
+              (one per corner). True means that corner's raw pixel
+              coordinates are trustworthy (its true angle from the optical
+              axis is inside the lens's calibrated FOV). Corners marked
+              False should not be connected to other corners using their
+              raw pixel value — either skip that edge client-side or use
+              `calculate_projected_bounding_box_edges` for an outline
+              that's already clipped to the FOV boundary.
     """
     if isinstance(boxes, dict):
         boxes = [boxes]
     if not boxes:
-        return []
+        return [], []
 
     # Stack every box into (N, 3, 9)
     stacked = np.stack(
@@ -155,15 +177,128 @@ def calculate_projected_bounding_boxes(
     # single-box layout of (1, 1, 3, 9)
     bbox = torch.from_numpy(stacked).unsqueeze(0)
 
-    image_points = project_bbox3d(bbox, channel_name)
-    # image_points expected shape: (1, N, 2, 9) or compatible
+    image_points, valid_mask = project_bbox3d(bbox, channel_name)
+    # image_points: (1, N, 2, 9), valid_mask: (1, N, 9)
 
     pts = image_points[0]          # (N, 2, 9)
     pts = pts.permute(0, 2, 1)     # (N, 9, 2)
     pts = pts[:, :8, :]            # drop center point → (N, 8, 2)
     pts = pts * zoom_factor
 
-    return pts.cpu().numpy().tolist()  # list[list[list[float]]]  N x 8 x 2
+    mask = valid_mask[0]           # (N, 9)
+    mask = mask[:, :8]             # drop center point → (N, 8)
+
+    return pts.cpu().numpy().tolist(), mask.cpu().numpy().tolist()  # (N x 8 x 2), (N x 8)
+
+
+# The 12 edges of a box, indexed into the 8-corner ordering produced by
+# _corner_points() (0-3 bottom face, 4-7 top face, same winding on both).
+BOX_EDGES = [
+    (0, 1), (1, 2), (2, 3), (3, 0),  # bottom face
+    (4, 5), (5, 6), (6, 7), (7, 4),  # top face
+    (0, 4), (1, 5), (2, 6), (3, 7),  # verticals
+]
+
+
+def calculate_projected_bounding_box_edges_clipped(
+    x_pos, y_pos, z_pos, length, width, height, yaw,
+    coordinate_system,
+    zoom_factor,
+    channel_name,
+):
+    """
+    Project a single 3D box's edges into one camera channel, clipping any
+    edge that leaves the lens's calibrated FOV at the exact boundary
+    instead of dropping the whole edge or letting the raw fisheye
+    polynomial fold a far-outside corner back into the frame.
+
+    NOTE: this returns 12 edge *segments* (each with its own two
+    endpoints, since a clipped edge no longer shares a corner with its
+    neighbor), not 8 shared corner points. tool_image.ts's
+    calculateAndDrawLineSegments currently expects exactly 8 shared corner
+    points indexed 0-7, so this function is not a drop-in replacement for
+    the current /project_bounding_box endpoint — use
+    calculate_projected_bounding_box_edges (below) for that. This one is
+    for a future frontend that draws pre-built segments directly.
+
+    Returns:
+        List of 12 entries (one per BOX_EDGES edge), each either
+        [[x1, y1], [x2, y2]] (already scaled by zoom_factor) or None if
+        that edge falls entirely outside the FOV and should be skipped.
+    """
+    projection_cam = fisheye_cams[channel_name]
+
+    corners_world = _box_to_corners_tensor(
+        x_pos, y_pos, z_pos, length, width, height, yaw, coordinate_system,
+    )  # (3, 9): 8 corners + center
+    corners_world = torch.from_numpy(corners_world[:, :8]).unsqueeze(0).unsqueeze(0)  # (1, 1, 3, 8)
+
+    corners_cam = projection_cam.project_world_to_cam(corners_world)  # (1, 1, 3, 8)
+    corners_cam = corners_cam[0, 0]  # (3, 8)
+
+    edges = projection_cam.clip_box_edges_to_fov(corners_cam, BOX_EDGES)
+
+    return [
+        None if edge is None else [
+            (edge[0] * zoom_factor).tolist(),
+            (edge[1] * zoom_factor).tolist(),
+        ]
+        for edge in edges
+    ]
+
+
+def calculate_projected_bounding_box_edges(
+    boxes,
+    coordinate_system,
+    zoom_factor,
+    channel_name,
+):
+    """
+    Batched projection for the /project_bounding_box endpoint, compatible
+    with tool_image.ts's existing 8-shared-corner-point contract.
+
+    Same corner shape/order as calculate_projected_bounding_boxes, but any
+    corner whose true angle from the optical axis falls outside the lens's
+    calibrated FOV is returned as `None` instead of its raw pixel value
+    (which past that point is not a faithful projection — see
+    FisheyeCam.project_cam_to_fe_image). `None` survives JSON as `null`
+    (unlike NaN/Infinity, which Python's json module happily emits but
+    JS's strict JSON.parse rejects, so the browser's response.json() call
+    would throw). tool_image.ts's drawLine() already guards on
+    `pointStart !== undefined` and `isFinite(...)`, so once the Vector2
+    conversion in projectBoundingBoxes() maps a `null` entry to
+    `undefined` (one-line change — see below), every line segment
+    touching an out-of-FOV corner is silently skipped, with no other
+    frontend changes required.
+
+        // in projectBoundingBoxes(), replace:
+        //   boxPoints.map(pt => new THREE.Vector2(pt[0], pt[1]))
+        // with:
+        //   boxPoints.map(pt => pt === null ? undefined : new THREE.Vector2(pt[0], pt[1]))
+
+    This trades precision for compatibility: an edge with one out-of-FOV
+    corner is dropped entirely rather than clipped exactly at the FOV
+    boundary (see calculate_projected_bounding_box_edges_clipped above
+    for that sharper version, which needs a bigger frontend change since
+    it returns edge segments instead of shared corners).
+
+    Returns:
+        list of length N (one per input box), each element the 8 corner
+        points as [[x, y], ...] scaled by zoom_factor, with `None` in
+        place of any corner outside the calibrated FOV. Always a list,
+        even when N == 1.
+    """
+    points, valid_mask = calculate_projected_bounding_boxes(
+        boxes=boxes,
+        coordinate_system=coordinate_system,
+        zoom_factor=zoom_factor,
+        channel_name=channel_name,
+    )
+
+    return [
+        [corner if valid else None for corner, valid in zip(box_points, box_mask)]
+        for box_points, box_mask in zip(points, valid_mask)
+    ]
 
 
 def project_points(points3d, projection_matrix, scaling_factor):

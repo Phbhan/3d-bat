@@ -30,5 +30,5 @@ def project_bbox3d(
     """
     projection_cam = fisheye_cams[cam_pos]
     camera_points = projection_cam.project_world_to_cam(bbox_3d_world)
-    fisheye_points, _ = projection_cam.project_cam_to_fe_image(camera_points)
-    return fisheye_points
+    fisheye_points, _, valid_mask = projection_cam.project_cam_to_fe_image(camera_points)
+    return fisheye_points, valid_mask
