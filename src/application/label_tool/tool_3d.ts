@@ -49,6 +49,7 @@ import {
     GridHelper,
     Intersection,
     LineBasicMaterial,
+    LineLoop,
     LineSegments,
     LoadingManager,
     Material,
@@ -372,6 +373,9 @@ class LabelTool3D {
 
         this.setCamera();
         this.createGrid();
+        this.createEgoBoundary(12, 12, "ego-boundary-1", 0xfeb236);
+        this.createEgoBoundary(15, 15, "ego-boundary-2", 0xd64161);
+        this.createEgoBoundary(20, 20, "ego-boundary-3", 0xff7b25);
 
         this.canvas3D = document.getElementById('canvas3d')!;
         if ($("#canvas3d").children().length > 0) {
@@ -1464,6 +1468,30 @@ class LabelTool3D {
         }
         this.scene.add(this.grid);
         this.scenePersistentObjects.push(this.grid);
+    }
+
+    // Rectangle centered on ego (world x=0, y=0), +-10m in x (forward/back) and
+    // +-9m in y (left/right), sitting flat on the ground (same z offset as the grid
+    // and the ego vehicle model: -positionLidar[2], since the lidar frame is the
+    // scene origin and the ground sits one lidar-height below it).
+    createEgoBoundary(halfX: number = 15, halfY: number = 15, name: string = "ego-boundary", color: number = 0xffff00) {
+        this.removeObject(name);
+
+        const groundZ = -this.labelTool.positionLidar[2];
+        const corners = [
+            new Vector3(-halfX, -halfY, groundZ),
+            new Vector3(halfX, -halfY, groundZ),
+            new Vector3(halfX, halfY, groundZ),
+            new Vector3(-halfX, halfY, groundZ),
+        ];
+
+        const geometry = new BufferGeometry().setFromPoints(corners);
+        const material = new LineBasicMaterial({color: color});
+        const egoBoundary = new LineLoop(geometry, material);
+        egoBoundary.name = name;
+
+        this.scene.add(egoBoundary);
+        this.scenePersistentObjects.push(egoBoundary);
     }
 
     initGuiBoundingBoxAnnotations() {
