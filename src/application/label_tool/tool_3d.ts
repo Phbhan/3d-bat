@@ -3956,6 +3956,9 @@ class LabelTool3D {
             case KEYS.CODE_C:
                 this.switchView();
                 break;
+            case KEYS.CODE_F:
+                this.labelTool.toggleInfoDashboard();
+                break;
             case KEYS.CODE_N:
                 this.labelTool.nextFrame();
                 break;

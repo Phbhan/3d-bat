@@ -103,6 +103,7 @@ class LabelTool {
     frameAnnotationType: FrameAnnotationType = "continuous_sequence";
     colorSelectedObject = "#ff0000";
     drawEgoVehicle = false;
+    infoDashboardVisible = false;
 
     // active learning
     activeLearningConfig: {};
@@ -246,6 +247,7 @@ class LabelTool {
         this.initClasses();
         this.initClassPicker();
         this.initFrameSelector();
+        this.initInfoDashboard();
 
         this.initCameraWindows();
         this.loadImageData();
@@ -259,6 +261,7 @@ class LabelTool {
             this.loadVehicleModel();
         }
         this.labelToolImage.draw2DProjections();
+        this.updateInfoDashboard();
         this.addEventHandler();
     }
 
@@ -584,6 +587,75 @@ class LabelTool {
         });
     }
 
+    // Small fixed-position panel showing the current frame's file names + the
+    // name/timestamp/index fields that come from the annotation file's frame-level
+    // metadata (see FrameMeta in dataloader.ts / this.frameProperties). Hidden by
+    // default, toggled with a keyboard shortcut (see keyDownHandler in tool_3d.ts).
+    initInfoDashboard() {
+        if ($("#info-dashboard").length > 0) {
+            return; // already built (e.g. re-entering start())
+        }
+        const panel = $(
+            `<div id="info-dashboard" style="
+                display: none;
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                z-index: 10000;
+                background: rgba(20, 20, 20, 0.9);
+                color: #eee;
+                font-family: monospace;
+                font-size: 12px;
+                padding: 10px 14px;
+                border-radius: 6px;
+                border: 1px solid #555;
+                min-width: 260px;
+                line-height: 1.6;
+                pointer-events: none;
+            ">
+                <div style="font-weight:bold; margin-bottom:6px; border-bottom:1px solid #555; padding-bottom:4px;">Frame Info</div>
+                <div>Image file: <span id="info-image-file"></span></div>
+                <div>Annotation file: <span id="info-annotation-file"></span></div>
+                <div>Lidar file: <span id="info-lidar-file"></span></div>
+                <div>Camera channel: <span id="info-camera-channel"></span></div>
+                <div style="margin-top:6px; border-top:1px solid #555; padding-top:4px;">
+                    <div>Name: <span id="info-frame-name"></span></div>
+                    <div>Timestamp: <span id="info-frame-timestamp"></span></div>
+                    <div>Index: <span id="info-frame-index"></span></div>
+                </div>
+            </div>`
+        );
+        $("body").append(panel);
+    }
+
+    updateInfoDashboard() {
+        if ($("#info-dashboard").length === 0) {
+            return;
+        }
+        const idx = this.currentFrameIndex;
+        const channel = this.currentCameraChannelName;
+        const imageFile = this.imageFileNames?.[channel]?.[idx] ?? "-";
+        const annotationFile = this.annotationFileNames?.[idx] ?? "-";
+        const lidarFile = this.pointCloudFileNames?.[idx] ?? "-";
+        const frameMeta: any = this.frameProperties?.[idx] ?? {};
+
+        $("#info-image-file").text(imageFile);
+        $("#info-annotation-file").text(annotationFile);
+        $("#info-lidar-file").text(lidarFile);
+        $("#info-camera-channel").text(channel || "-");
+        $("#info-frame-name").text(frameMeta.name ?? "-");
+        $("#info-frame-timestamp").text(frameMeta.timestamp ?? "-");
+        $("#info-frame-index").text(frameMeta.index ?? "-");
+    }
+
+    toggleInfoDashboard() {
+        this.infoDashboardVisible = !this.infoDashboardVisible;
+        $("#info-dashboard").css("display", this.infoDashboardVisible ? "block" : "none");
+        if (this.infoDashboardVisible) {
+            this.updateInfoDashboard();
+        }
+    }
+
     setLabelToolImage(labelToolImage: LabelToolImage) {
         this.labelToolImage = labelToolImage;
     }
@@ -819,6 +891,7 @@ class LabelTool {
         }
 
         this.currentFrameIndex = newFileIndex;
+        this.updateInfoDashboard();
         // this.annotationObjects.__selectionIndexCurrentFrame = this.annotationObjects.__selectionIndexNextFrame;
 
         // --- timing instrumentation -------------------------------------------------
@@ -1024,6 +1097,7 @@ class LabelTool {
         this.loadImageData();
         this.labelTool3D.loadAnnotations();
         this.labelToolImage.draw2DProjections();
+        this.updateInfoDashboard();
 
         $("#left-btn").css("left", 0);
         $("#class-picker").css("left", 10);
