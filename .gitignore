@@ -42,6 +42,7 @@ yarn.lock
 
 docs
 input
+output
 /public/
 package-lock.json
 build
@@ -205,3 +206,4 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
