@@ -16,6 +16,15 @@ def create_files(input_folder_path_drive):
             for name in img_filenames:
                 img_writer.write(name + '\n')
 
+    ext = sorted(glob.glob(os.path.join(input_folder_path_drive, 'images_BEV', '*')))[0].split('.')[-1]
+    txt_bev_file = os.path.join(input_folder_path_drive, 'bev_filenames.txt')
+    img_bev_filenames = sorted(glob.glob(os.path.join(input_folder_path_drive, 'images_BEV', f'*.{ext}')))
+    img_bev_filenames = [i.split('/')[-1] for i in img_bev_filenames]
+    with open(txt_bev_file, 'w') as img_bev_writer:
+        for name in img_bev_filenames:
+            img_bev_writer.write(name + '\n')
+
+
     lidar_channels = os.listdir(os.path.join(input_folder_path_drive, 'point_clouds'))
     lidar_channels = [i for i in lidar_channels if 'LIDAR' in i]
     print("lidar_channels: ", lidar_channels)
@@ -29,7 +38,7 @@ def create_files(input_folder_path_drive):
         for name in pcd_filenames:
             pcd_writer.write(name + '\n')
 
-    anno_dir = os.path.join(input_folder_path_drive, 'annotations')
+    anno_dir = os.path.join(input_folder_path_drive, 'annotations_CAM_FRONT')
     annotation_file_names = sorted(glob.glob(os.path.join(anno_dir, '*.json')))
     annotation_file_names = [i.split('/')[-1] for i in annotation_file_names]
     annos_txt = os.path.join(input_folder_path_drive, 'annotation_filenames.txt')

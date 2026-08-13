@@ -31,6 +31,28 @@ class LabelToolImage{
     headerHeight: number = 0;
     circleArray: RaphaelElement<"SVG" | "VML", Element | SVGCircleElement>[] = [];
 
+    // BEV is a single top-down panel per frame (not one per camera
+    // channel), so it gets its own Raphael paper/image arrays indexed
+    // only by fileIndex.
+    paperArrayAllBEV: RaphaelPaper[] = [];
+    imageArrayAllBEV: RaphaelElement<"SVG" | "VML", Element | SVGImageElement>[] = [];
+    // The single "image-bev" DOM canvas (set once in tool_main.ts'
+    // initCameraWindows(), analogous to canvasArray[channelIdx] for the
+    // per-channel panels).
+    canvasElemBEV: HTMLCanvasElement | undefined;
+
+    // Pixel size of the images_BEV/*.jpg tiles, and the real-world extent
+    // (meters) each tile covers — matches the defaults used to render
+    // those images server-side (see build_bev_detection /
+    // draw_bev_canvas_world_topview in project_bbox2img.py: w_img=2000,
+    // h_img=2250, width_size=20, height_size=30). If the box ends up
+    // offset from the vehicle footprint in the rendered tile, this is the
+    // first place to check against however images_BEV/ was actually generated.
+    readonly bevImageWidth: number = 2000;
+    readonly bevImageHeight: number = 2250;
+    readonly bevWidthMeters: number = 20;
+    readonly bevHeightMeters: number = 30;
+
     constructor(labelTool: LabelTool, annotationClasses: AnnotationClass, annotationObjects: AnnotationObject) {
         this.labelTool = labelTool;
         this.annotationClasses = annotationClasses;
@@ -70,6 +92,55 @@ class LabelToolImage{
             this.labelTool.currentImageArray[channelIdx]['y'],
             this.labelTool.currentImageArray[channelIdx]['width'],
             this.labelTool.currentImageArray[channelIdx]['height']);
+    }
+
+    /**
+     * Loads the frame's top-down BEV image from images_BEV/, which sits
+     * next to images/ (not nested inside a per-camera-channel subfolder —
+     * BEV is one image per frame, not per channel). Mirrors
+     * loadCameraImages' path-building pattern exactly.
+     *
+     * The paper's coordinate space is the panel's on-screen size
+     * (labelTool.canvasSizeBEV), not the tile's native 2000x2250
+     * resolution — the image is drawn scaled down to fit, and
+     * drawBoundingBoxBEV() scales its box coordinates down the same way
+     * so the two line up.
+     *
+     * Assumes labelTool exposes a per-frame BEV filename list the same
+     * way it exposes imageFileNames[camChannel][fileIndex] for camera
+     * channels — e.g. labelTool.imageFileNamesBEV[fileIndex]. That list
+     * needs to be populated wherever imageFileNames itself gets built
+     * (dataset/sequence loading, outside this file) since BEV filenames
+     * don't necessarily share a base name with any camera channel's files.
+     *
+     * Also assumes a #canvasBEV-equivalent Raphael paper already exists
+     * at this.paperArrayAllBEV[fileIndex] — create it the same way the
+     * per-channel canvases/papers get created (not in this file; see
+     * wherever paperArrayAll[fileIndex][channelIdx] is set up) before
+     * calling this.
+     */
+    loadBEVImage(fileIndex: number, labelTool) {
+        const bevFileName = labelTool.imageFileNamesBEV?.[fileIndex];
+        if (bevFileName === undefined) {
+            console.warn("loadBEVImage: labelTool.imageFileNamesBEV[" + fileIndex + "] is not set — populate it wherever imageFileNames is built for camera channels.");
+            return;
+        }
+
+        const imgPath = "../../input/" + labelTool.currentDataset + "/" + labelTool.currentSequence
+            + "/images_BEV/" + bevFileName;
+
+        const paper: RaphaelPaper = this.paperArrayAllBEV[fileIndex];
+        if (paper === undefined) {
+            console.warn("loadBEVImage: paperArrayAllBEV[" + fileIndex + "] is not set — create the BEV canvas/Raphael paper before calling this.");
+            return;
+        }
+
+        this.imageArrayAllBEV[fileIndex] = paper.image(
+            imgPath,
+            0, 0,
+            labelTool.canvasSizeBEV[0],
+            labelTool.canvasSizeBEV[1],
+        );
     }
 
     cancelDefault(e) {
@@ -125,25 +196,116 @@ class LabelToolImage{
 
 
     removeProjectedBoundingBox(channelObj) {
-        for (let lineObj in channelObj.lines) {
-            if (channelObj.lines.hasOwnProperty(lineObj)) {
-                let line = channelObj.lines[lineObj];
-                if (line !== undefined) {
-                    line.remove();
-                }
+        for (const line of channelObj.lines) {
+            if (line !== undefined) {
+                line.remove();
             }
         }
     }
 
+    /**
+     * Draws a box's footprint (4 bottom-corner edges) on the BEV panel as
+     * a simple orthographic top-down projection — unlike the camera
+     * channels, BEV has no lens distortion to account for, so this is
+     * plain 2D geometry with no server round-trip.
+     *
+     * Coordinate convention: "depth" (vertical axis in the image) tracks
+     * box.x (forward), "left" (horizontal axis) tracks box.y (left), both
+     * mirrored around the image center — matches how images_BEV/ is
+     * actually rendered (verified visually; boxes appeared flipped
+     * top-to-bottom and left-to-right against the tile before the mirror
+     * was added). If the box ever renders offset/rotated again after
+     * images_BEV/'s generation changes, this mapping is the first place
+     * to adjust.
+     *
+     * Positions are computed in the BEV tile's native 2000x2250 pixel
+     * space, then scaled down to the panel's actual on-screen size
+     * (labelTool.canvasSizeBEV) — the paper itself is created at that
+     * display size (see initCameraWindows in tool_main.ts), matching how
+     * loadBEVImage() draws the image scaled down too.
+     */
+    drawBoundingBoxBEV(box: AnnotationObjectParams, isSelected: boolean, fileIndex: number = this.labelTool.currentFrameIndex) {
+        const paper: RaphaelPaper = this.paperArrayAllBEV[fileIndex];
+        if (paper === undefined) {
+            return;
+        }
+
+        const bevBox = (<any>box);
+        if (bevBox.bev !== undefined) {
+            this.removeProjectedBoundingBox(bevBox.bev);
+        }
+
+        const color = isSelected
+            ? this.labelTool.colorSelectedObject
+            : this.annotationClasses.annotationClasses[box.class].color;
+
+        // 4 bottom corners in box-local space, same consecutive winding
+        // order used everywhere else in this codebase (see
+        // _corner_points() in project_bbox2img.py) — edges 0-1, 1-2, 2-3,
+        // 3-0 form the rectangle.
+        const cornersLocal: [number, number][] = [
+            [box.length / 2, box.width / 2],
+            [box.length / 2, -box.width / 2],
+            [-box.length / 2, -box.width / 2],
+            [-box.length / 2, box.width / 2],
+        ];
+
+        const cosYaw = Math.cos(box.rotationYaw);
+        const sinYaw = Math.sin(box.rotationYaw);
+
+        const wRes = this.bevImageWidth / this.bevWidthMeters;
+        const hRes = this.bevImageHeight / this.bevHeightMeters;
+
+        // Scale from native tile pixels down to the panel's displayed
+        // size. Normally scaleX === scaleY (setCanvasSizeBEV preserves the
+        // tile's aspect ratio), kept separate defensively in case that
+        // ever changes.
+        const scaleX = this.labelTool.canvasSizeBEV[0] / this.bevImageWidth;
+        const scaleY = this.labelTool.canvasSizeBEV[1] / this.bevImageHeight;
+
+        const toPixel = (localX: number, localY: number): Vector2 => {
+            const worldX = box.x + (localX * cosYaw - localY * sinYaw);
+            const worldY = box.y + (localX * sinYaw + localY * cosYaw);
+            const depth = worldX;
+            const left = worldY;
+            // Mirrored on both axes (subtract from center instead of add)
+            // relative to the original mapping — matches how images_BEV/
+            // is actually rendered; boxes appeared flipped top-to-bottom
+            // and left-to-right against the tile before this adjustment.
+            return new Vector2(
+                (this.bevImageWidth / 2 - left * wRes) * scaleX,
+                (this.bevImageHeight / 2 - depth * hRes) * scaleY,
+            );
+        };
+
+        const pixelCorners = cornersLocal.map(([lx, ly]) => toPixel(lx, ly));
+
+        const lines: RaphaelPath<"SVG" | "VML">[] = [];
+        for (let i = 0; i < 4; i++) {
+            const p1 = pixelCorners[i];
+            const p2 = pixelCorners[(i + 1) % 4];
+            let line = paper.path(["M", p1.x, p1.y, "L", p2.x, p2.y] as any);
+            line.attr({stroke: color, "stroke-width": 2});
+            lines.push(line);
+        }
+
+        bevBox.bev = { lines };
+    }
+
     remove2DBoundingBoxes() {
-        for (let i = 0; i < this.annotationObjects.contents[this.labelTool.currentFrameIndex].length; i++) {
-            for (let j = 0; j < this.annotationObjects.contents[this.labelTool.currentFrameIndex][i].channels.length; j++) {
-                for (let k = 0; k < this.annotationObjects.contents[this.labelTool.currentFrameIndex][i].channels[j].lines.length; k++) {
-                    let line = this.annotationObjects.contents[this.labelTool.currentFrameIndex][i].channels[j].lines[k];
+        const frameContents = this.annotationObjects.contents[this.labelTool.currentFrameIndex];
+        for (const obj of frameContents) {
+            for (const channelObj of obj.channels) {
+                for (const line of channelObj.lines) {
                     if (line !== undefined) {
                         line.remove();
                     }
                 }
+            }
+
+            const bev = (<any>obj).bev;
+            if (bev !== undefined) {
+                this.removeProjectedBoundingBox(bev);
             }
         }
     }
@@ -166,47 +328,18 @@ class LabelToolImage{
             yaw: number
         }>
     ): Promise<{ [channel: string]: (Vector2 | undefined)[][] }> {
-    
-        const timings: { [stage: string]: number } = {};
-        const totalStart = performance.now();
-    
-    
-        // ------------------------------------
-        // 1. Prepare channels
-        // ------------------------------------
-        let start = performance.now();
 
         const channels = this.labelTool.cameraChannels.map((ch, idx) => ({
             channel: ch.channel,
             zoomFactor: this.labelTool.imageScale[idx],
         }));
-    
-        timings["prepare_channels"] = performance.now() - start;
 
-        // ------------------------------------
-        // 2. JSON stringify
-        // ------------------------------------
-        start = performance.now();
-    
         const requestBody = JSON.stringify({
             boxes,
             coordinateSystem: this.labelTool.coordinateSystem,
             channels,
         });
-    
-        timings["JSON.stringify"] = performance.now() - start;
-    
-        console.log(
-            "Request size:",
-            (requestBody.length / 1024).toFixed(2),
-            "KB"
-        );
-    
-        // ------------------------------------
-        // 3. Fetch + backend
-        // ------------------------------------
-        start = performance.now();
-    
+
         const response = await fetch('/project_bounding_box', {
             method: 'POST',
             headers: {
@@ -214,37 +347,21 @@ class LabelToolImage{
             },
             body: requestBody
         });
-    
-    
+
         if (!response.ok) {
             throw new Error(
                 'Projection request failed: ' + response.status
             );
         }
-    
-        timings["fetch_wait"] = performance.now() - start;
-    
-        // ------------------------------------
-        // 4. JSON parse
-        // ------------------------------------
-        start = performance.now();
-    
+
         const result: {
             [channel: string]: (number[] | null)[][]
         } = await response.json();
-    
-        timings["response.json"] = performance.now() - start;
-    
-        // ------------------------------------
-        // 5. Convert to THREE.Vector2
-        // ------------------------------------
-        start = performance.now();
-    
+
         const converted: {
             [channel: string]: (Vector2 | undefined)[][]
         } = {};
-    
-    
+
         for (const channel in result) {
 
             // Corners outside the camera's calibrated FOV come back as
@@ -264,15 +381,7 @@ class LabelToolImage{
                         )
                 );
         }
-    
-    
-        timings["Vector2 conversion"] = performance.now() - start;
-        timings["TOTAL"] = performance.now() - totalStart;
-    
-    
-        console.table(timings);
-    
-    
+
         return converted;
     }
 
@@ -281,15 +390,12 @@ class LabelToolImage{
         let channel = channelObj.channel;
         let lineArray: RaphaelPath<"SVG" | "VML">[] = [];
         let channelIdx = Utils.getChannelIndexByName(this.labelTool.cameraChannels, channel);
-        // temporary color bottom 4 lines in yellow to check if projection matrix is correct
-        // uncomment line to use yellow to color bottom 4 lines
         let color;
         if (selected === true) {
             color = this.labelTool.colorSelectedObject;
         } else {
             color = this.annotationClasses.annotationClasses[className].color;
         }
-        // console.log("channelObj: ", channelObj);
 
         // bottom four lines
         lineArray.push(this.drawLine(channelIdx, channelObj.projectedPoints[0], channelObj.projectedPoints[1], color, fileIndex)!);
@@ -372,6 +478,7 @@ class LabelToolImage{
             const points = projectedByChannel[channelObj.channel]?.[0] || [];
             channelObj.projectedPoints = points;
             this.removeProjectedBoundingBox(channelObj);
+            // 8 = all box corners present (see calculateAndDrawLineSegments)
             if (points.length === 8) {
                 channelObj.lines = this.calculateAndDrawLineSegments(
                     channelObj,
@@ -381,6 +488,8 @@ class LabelToolImage{
                 );
             }
         }
+
+        this.drawBoundingBoxBEV(obj, isSelected, fileIndex);
     }
 
     drawLine(channelIdx: number, pointStart, pointEnd, color, fileIndex: number = this.labelTool.currentFrameIndex) {
@@ -388,8 +497,7 @@ class LabelToolImage{
 
             let line = this.paperArrayAll[fileIndex][channelIdx].path(
                 ["M", pointStart.x, pointStart.y, "L", pointEnd.x, pointEnd.y]);
-            line.attr("stroke", color);
-            line.attr("stroke-width", 1);
+            line.attr({stroke: color, "stroke-width": 1});
             return line;
         } else {
             return undefined;
@@ -416,6 +524,7 @@ class LabelToolImage{
         // Draw lines
         for (let i = 0; i < box.channels.length; i++) {
             const channelObj = box.channels[i];
+            // 8 = all box corners present (see calculateAndDrawLineSegments)
             if (channelObj.channel && channelObj.projectedPoints?.length === 8) {
                 channelObj.lines = this.calculateAndDrawLineSegments(
                     channelObj,
@@ -425,6 +534,8 @@ class LabelToolImage{
                 );
             }
         }
+
+        this.drawBoundingBoxBEV(box, true, fileIndex);
     }
 
     async projectPoints(points3D, channelIdx: number) {
@@ -509,6 +620,7 @@ class LabelToolImage{
             const channelObj = params.channels[i];
             if (!channelObj.channel) continue;
             channelObj.projectedPoints = projectedByChannel[channelObj.channel]?.[0] || [];
+            // 8 = all box corners present (see calculateAndDrawLineSegments)
             if (channelObj.projectedPoints.length === 8) {
                 channelObj.lines = this.calculateAndDrawLineSegments(
                     channelObj,
@@ -518,11 +630,11 @@ class LabelToolImage{
                 );
             }
         }
+
+        this.drawBoundingBoxBEV(params, false, fileIndex);
     }
 
     async draw2DProjections() {
-        const timings: { [stage: string]: number } = {};
-        const totalStart = performance.now();
         const fileIndex = this.labelTool.currentFrameIndex;
         const frameContents = this.annotationObjects.contents[fileIndex];
     
@@ -530,10 +642,6 @@ class LabelToolImage{
             return;
         }
     
-        // --------------------------------------------------
-        // 1. Prepare boxes
-        // --------------------------------------------------
-        let start = performance.now();
         const boxes = frameContents.map(obj => ({
             x: obj.x,
             y: obj.y,
@@ -544,52 +652,24 @@ class LabelToolImage{
             yaw: obj.rotationYaw,
         }));
     
-        timings["prepare_boxes"] = performance.now() - start;
-
-        // --------------------------------------------------
-        // 2. Projection request
-        // --------------------------------------------------
-        start = performance.now();
         const projectedByChannel = await this.projectBoundingBoxes(boxes);
-        timings["project_request"] = performance.now() - start;
-
-        // --------------------------------------------------
-        // 3. Process objects
-        // --------------------------------------------------
-        let assignTime = 0;
-        let removeTime = 0;
-        let drawTime = 0;
     
         for (let i = 0; i < frameContents.length; i++) {
             const obj = frameContents[i];
+            const isSelected = (this.annotationObjects.getSelectionIndex() === i);
             for (let chIdx = 0; chIdx < obj.channels.length; chIdx++) {
                 const channelObj = obj.channels[chIdx];
                 const channelName = channelObj.channel;
                 if (!channelName)
                     continue;
     
-                // -----------------------------
-                // assign points
-                // -----------------------------
-                start = performance.now();
                 const points = projectedByChannel[channelName]?.[i] || [];
                 channelObj.projectedPoints = points;
-                assignTime += performance.now() - start;
 
-                // -----------------------------
-                // remove old SVG
-                // -----------------------------
-                start = performance.now();
                 this.removeProjectedBoundingBox(channelObj);
-                removeTime += performance.now() - start;
 
-                // -----------------------------
-                // draw SVG
-                // -----------------------------
+                // 8 = all box corners present (see calculateAndDrawLineSegments)
                 if (points.length === 8) {
-    
-                    start = performance.now();
-                    const isSelected = (this.annotationObjects.getSelectionIndex() === i);
                     channelObj.lines =
                         this.calculateAndDrawLineSegments(
                             channelObj,
@@ -597,42 +677,41 @@ class LabelToolImage{
                             isSelected,
                             fileIndex
                         );
-    
-                    drawTime += performance.now() - start;
                 }
             }
+
+            // BEV panel: one static top-down image per frame (not per camera
+            // channel), so every object's footprint is redrawn here once,
+            // independent of the per-channel loop above. drawBoundingBoxBEV
+            // handles removing its own previous SVG internally.
+            this.drawBoundingBoxBEV(obj, isSelected, fileIndex);
         }
-    
-    
-        timings["assign_points"] = assignTime;
-        timings["remove_lines"] = removeTime;
-        timings["draw_lines"] = drawTime;
-    
-    
-        timings["TOTAL"] = performance.now() - totalStart;
-    
-    
-        console.table(timings);
     }
 
     changeClassColorImage(bbIndex, newClass) {
         let annotation = this.annotationObjects.contents[this.labelTool.currentFrameIndex][bbIndex];
         let color = this.annotationClasses.annotationClasses[newClass].color;
         // update color in all 6 channels
-        for (let i = 0; i < annotation["channels"].length; i++) {
-            if (annotation["channels"][i]["lines"] !== undefined) {
-                for (let lineObj in annotation["channels"][i]["lines"]) {
-                    if (annotation["channels"][i]["lines"].hasOwnProperty(lineObj)) {
-                        const line = annotation["channels"][i]["lines"][lineObj];
-                        // drawLine() returns undefined for any edge whose
-                        // endpoint(s) fell outside the camera's calibrated
-                        // FOV (see projectBoundingBoxes' null -> undefined
-                        // mapping) — a partially-clipped box will have a
-                        // mix of real lines and undefined slots here.
-                        if (line !== undefined) {
-                            line.attr({stroke: color});
-                        }
+        for (const channelObj of annotation["channels"]) {
+            if (channelObj["lines"] !== undefined) {
+                for (const line of channelObj["lines"]) {
+                    // drawLine() returns undefined for any edge whose
+                    // endpoint(s) fell outside the camera's calibrated
+                    // FOV (see projectBoundingBoxes' null -> undefined
+                    // mapping) — a partially-clipped box will have a
+                    // mix of real lines and undefined slots here.
+                    if (line !== undefined) {
+                        line.attr({stroke: color});
                     }
+                }
+            }
+        }
+
+        const bev = (<any>annotation).bev;
+        if (bev !== undefined && bev.lines !== undefined) {
+            for (const line of bev.lines) {
+                if (line !== undefined) {
+                    line.attr({stroke: color});
                 }
             }
         }

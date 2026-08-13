@@ -66,6 +66,9 @@ class LabelTool {
     annotationFileNames = [];
     pointCloudFileNames = [];
     imageFileNames: string[][] = [];
+    // One BEV image per frame (images_BEV/), not per camera channel —
+    // populated in setFileNames() the same way imageFileNames is.
+    imageFileNamesBEV: string[] = [];
     fileNames = [];
 
     // Image properties
@@ -77,6 +80,9 @@ class LabelTool {
 
     // Image Canvas
     canvasSize: number[] = [];
+    // Size (px) of the BEV panel — height matches the camera panels' height,
+    // width is derived from it to preserve the images_BEV/*.jpg aspect ratio.
+    canvasSizeBEV: number[] = [];
 
     defaultObjectSizes: ObjectSizes = emptyObjectSizes();
 
@@ -228,6 +234,11 @@ class LabelTool {
             this.imageFileNames[channel] = FileOperations.loadFileNames(fileName, this);
         }
 
+        // One BEV filename per frame — images_BEV/ is not split by camera
+        // channel, so this mirrors the per-channel loop above but with a
+        // single flat list (same convention as annotation_filenames.txt).
+        this.imageFileNamesBEV = FileOperations.loadFileNames("bev_filenames.txt", this);
+
         this.pointCloudFileNames = FileOperations.loadFileNames("point_cloud_filenames.txt", this);
         if (this.pointCloudFileNames.length === 0) {
             console.warn("point_cloud_filenames.txt is empty or missing — falling back to config num_frames");
@@ -355,6 +366,7 @@ class LabelTool {
         imageContainer = $("#label-tool-wrapper");
 
         this.setCanvasSize();
+        this.setCanvasSizeBEV();
 
         for (let i = 0; i < this.cameraChannels.length; i++){
             console.log("this.canvasSize: ", this.canvasSize);
@@ -397,6 +409,37 @@ class LabelTool {
                 }
                 this.labelToolImage.paperArray.push(Raphael(this.labelToolImage.canvasArray[channelIdx], imageWidth, imageHeight));
             }
+
+            // BEV panel: one image per frame (not per camera channel), so it
+            // gets a single "image-bev" div appended right after the camera
+            // panels — same DOM-order-as-layout pattern the per-channel divs
+            // rely on — and a Raphael paper per frame stacked in it exactly
+            // like paperArrayAll above (see setPanelSizeAndPosition for the
+            // z-index swap that shows only the current frame's paper).
+            if (this.imageCanvasInitialized === false) {
+                let idBEV = "image-bev";
+
+                imageContainer.append("<div id='" + idBEV + "'></div>");
+                $("#" + idBEV).css("width", this.canvasSizeBEV[0]);
+                $("#" + idBEV).css("height", this.canvasSizeBEV[1]);
+
+                this.labelToolImage.canvasElemBEV = document.getElementById(idBEV) as HTMLCanvasElement;
+            }
+            // Paper's coordinate system matches the panel's actual on-screen
+            // size (canvasSizeBEV) — same as the camera channels above. We
+            // deliberately do NOT create the paper at the BEV tile's native
+            // 2000x2250 resolution and rely on CSS to shrink it: without an
+            // explicit viewBox, an <svg> doesn't auto-scale its internal
+            // coordinates like an <img> does — it just renders 1 unit = 1px
+            // of whatever box size CSS gives it and clips/overflows the
+            // rest, which is why the image only showed a corner and bled
+            // into the neighboring camera panel. Instead, loadBEVImage()
+            // and drawBoundingBoxBEV() scale their own coordinates down to
+            // canvasSizeBEV before drawing.
+            this.labelToolImage.paperArrayAllBEV.push(
+                Raphael(this.labelToolImage.canvasElemBEV!, this.canvasSizeBEV[0], this.canvasSizeBEV[1])
+            );
+
             this.imageCanvasInitialized = true;
             this.labelToolImage.paperArrayAll.push(this.labelToolImage.paperArray);
         }
@@ -404,6 +447,12 @@ class LabelTool {
         for (let canvasElem in this.labelToolImage.canvasArray) {
             let canvas = this.labelToolImage.canvasArray[canvasElem];
             this.labelToolImage.addEvent(canvas, 'contextmenu',  (e) => {
+                return this.labelToolImage.cancelDefault(e);
+            });
+        }
+
+        if (this.labelToolImage.canvasElemBEV !== undefined) {
+            this.labelToolImage.addEvent(this.labelToolImage.canvasElemBEV, 'contextmenu', (e) => {
                 return this.labelToolImage.cancelDefault(e);
             });
         }
@@ -419,7 +468,6 @@ class LabelTool {
     }
 
     loadImageData() {
-        console.log("this.labelToolImage.imageArrayAll.length: ", this.labelToolImage.imageArrayAll.length)
         if(this.labelToolImage.imageArrayAll.length == 0)
         {
             for (let i = 0; i < this.numFrames; i++) {
@@ -432,7 +480,16 @@ class LabelTool {
                 this.labelToolImage.imageArrayAll.push(this.labelToolImage.imageArray);
             }
         }
-        console.log("this.cameraChannels: ", this.cameraChannels)
+
+        if (this.labelToolImage.imageArrayAllBEV.length == 0) {
+            for (let i = 0; i < this.numFrames; i++) {
+                this.labelToolImage.loadBEVImage(i, this);
+            }
+        }
+        if (this.labelToolImage.imageArrayAllBEV[this.currentFrameIndex] !== undefined) {
+            this.labelToolImage.imageArrayAllBEV[this.currentFrameIndex].toBack();
+        }
+
         for (let i = 0; i < this.cameraChannels.length; i++) {
             this.labelToolImage.imageArrayAll[this.currentFrameIndex][i].toBack();
 
@@ -517,6 +574,15 @@ class LabelTool {
         this.canvasSize[1] = this.canvasSize[0] / this.imageAspectRatio;
     }
 
+    // BEV panel is sized to match the camera panels' height, with width
+    // derived from the images_BEV/*.jpg aspect ratio (2000x2250 — see
+    // LabelToolImage.bevImageWidth/bevImageHeight) so the tile isn't stretched.
+    setCanvasSizeBEV() {
+        const bevAspectRatio = this.labelToolImage.bevImageWidth / this.labelToolImage.bevImageHeight;
+        this.canvasSizeBEV[1] = this.canvasSize[1];
+        this.canvasSizeBEV[0] = this.canvasSizeBEV[1] * bevAspectRatio;
+    }
+
     setPanelSizeAndPosition(newFileIndex) {
         let imageHeight = this.canvasSize[1];
 
@@ -544,6 +610,33 @@ class LabelTool {
     
             let zIndexTarget = this.numFrames - newFileIndex - 1;
             allSvg[zIndexTarget].style.zIndex = String(2);
+        }
+
+        // BEV panel: same stacked-SVGs-per-frame approach as above, just
+        // keyed by frame only (one "image-bev" div, not one per channel).
+        // The per-channel SVGs above are positioned with "left" relative to
+        // #label-tool-wrapper (i * imgWidth, not relative to their own
+        // div), so BEV's SVGs need the same treatment — offset past the
+        // total width of all camera channels — or they land at the same
+        // "left" as channel 0 and sit directly on top of it.
+        const bevLeft = this.cameraChannels.length * this.canvasSize[0];
+
+        let imageIdBEV = "#image-bev";
+        $(imageIdBEV).css("height", this.canvasSizeBEV[1]);
+        $(imageIdBEV).css("width", this.canvasSizeBEV[0]);
+
+        let allSvgBEV = $(imageIdBEV + " svg");
+        for (let j = 0; j < allSvgBEV.length; j++) {
+            allSvgBEV[j].style.width = String(this.canvasSizeBEV[0]);
+            allSvgBEV[j].style.height = String(this.canvasSizeBEV[1]);
+            allSvgBEV[j].style.zIndex = String(0);
+            allSvgBEV[j].style.position = "absolute";
+            allSvgBEV[j].style.left = bevLeft + "px";
+        }
+
+        let zIndexTargetBEV = this.numFrames - newFileIndex - 1;
+        if (allSvgBEV[zIndexTargetBEV]) {
+            allSvgBEV[zIndexTargetBEV].style.zIndex = String(2);
         }
     }
 
@@ -1012,6 +1105,9 @@ class LabelTool {
         this.labelToolImage.imageArray = [];
         this.labelToolImage.imageHeightOriginal = -1;
         this.labelToolImage.imageWidthOriginal = -1;
+        this.labelToolImage.canvasElemBEV = undefined;
+        this.labelToolImage.paperArrayAllBEV = [];
+        this.labelToolImage.imageArrayAllBEV = [];
 
         $(".frame-selector__frames").empty();
     }
@@ -1067,6 +1163,9 @@ class LabelTool {
         this.labelToolImage.imageArray = [];
         this.labelToolImage.imageHeightOriginal = -1;
         this.labelToolImage.imageWidthOriginal = -1;
+        this.labelToolImage.canvasElemBEV = undefined;
+        this.labelToolImage.paperArrayAllBEV = [];
+        this.labelToolImage.imageArrayAllBEV = [];
 
         $(".frame-selector__frames").empty();
     }

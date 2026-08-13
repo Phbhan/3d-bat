@@ -446,7 +446,6 @@ class LabelTool3D {
             // (see FileOperations), while the point cloud/HD map stay exactly as they were.
             chooseCameraChannelDropDownController = this.guiOptions.add(this.labelTool, 'selectCameraChannelName', this.labelTool.cameraChannelNames).name("Choose Camera Channel").listen();
             chooseCameraChannelDropDownController.onChange((value) => {
-                console.log("chooseCameraChannelDropDownController: ", value);
                 this.labelTool.changeCameraChannel(value);
             });
 
