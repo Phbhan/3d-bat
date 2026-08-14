@@ -2620,7 +2620,7 @@ class LabelTool3D {
             side: DoubleSide,
             morphTargets: false
         });
-        const cubeMaterials = [cubeMaterialSide, cubeMaterialSide, cubeMaterialSide, cubeMaterialFrontSide, cubeMaterialSide, cubeMaterialSide];
+        const cubeMaterials = [cubeMaterialFrontSide, cubeMaterialSide, cubeMaterialSide, cubeMaterialSide, cubeMaterialSide, cubeMaterialSide];
         // let faceMaterial = new MeshFaceMaterial(cubeMaterials);
         // let cubeMesh = new Mesh(cubeGeometry, faceMaterial);
         // TODO: check if Mesh can take an array of materials
@@ -2651,7 +2651,7 @@ class LabelTool3D {
         // the front face as length/width/height change; the counter-scale below only
         // keeps the cone's *shape* from stretching, using the scale at creation time.
         const arrowGeometry = new ConeBufferGeometry(0.15, 0.8, 8);
-        arrowGeometry.rotateZ(0);
+        arrowGeometry.rotateZ(-Math.PI / 2);
         const arrowMaterial = new MeshBasicMaterial({color: 0xffff00});
         const directionArrow = new Mesh(arrowGeometry, arrowMaterial);
         directionArrow.name = "direction-arrow";
