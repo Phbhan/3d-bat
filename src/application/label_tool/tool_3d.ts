@@ -3693,7 +3693,7 @@ class LabelTool3D {
         }
         this.labelTool.currentSequence = sequence;
 
-        this.labelTool.weatherTypes = this.labelTool.config.datasets[this.labelTool.currentDatasetIdx].weather_types;
+        this.labelTool.weatherTypes = this.labelTool.config.datasets[this.labelTool.currentDatasetIdx].weather_type;
 
         this.labelTool.setFileNames()
 
@@ -3738,7 +3738,10 @@ class LabelTool3D {
         insertedObject["insert_index"] = insertIndex;
         let checkbox = folderAttributes.add(insertedObject, ["attribute_value"]).name(attribute["name"]);
         checkbox.onChange((value) => {
-            this.annotationObjects.contents[this.labelTool.currentFrameIndex][insertedObject["insert_index"]]["attributes"][insertedObject["attribute_name"]] = value;
+            const idx = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
+            if (idx !== -1) {
+                this.annotationObjects.contents[this.labelTool.currentFrameIndex][idx]["attributes"][insertedObject["attribute_name"]] = value;
+            }
         });
         return checkbox;
     }

@@ -766,9 +766,13 @@ class LabelTool {
             this.annotationObjects.resetSingleObject(i);
         }
     }
-
+    
     setWeatherType(value) {
         this.annotationObjects.annotatedWeatherTypes[this.currentFrameIndex] = value;
+        if (!this.frameProperties[this.currentFrameIndex]) {
+            this.frameProperties[this.currentFrameIndex] = {};
+        }
+        this.frameProperties[this.currentFrameIndex].weather = value;
     }
 
     changeFrame(newFileIndex: number, undo: boolean = false) {
@@ -932,13 +936,25 @@ class LabelTool {
             }
         }
 
-        if (this.annotationObjects.annotatedWeatherTypes[newFileIndex] !== "") {
-            this.labelTool3D.parameters.weather_type = this.annotationObjects.annotatedWeatherTypes[newFileIndex];
+        // frameProperties[newFileIndex].weather is the real source of truth for a frame's
+        // weather: it's populated from the annotation file on load (dataloader.ts) and kept
+        // up to date by setWeatherType() on manual changes. annotatedWeatherTypes is *not*
+        // populated on load, only by setWeatherType(), so reading it here as the primary
+        // source (as this used to) shows "undefined" for any frame that hasn't been manually
+        // edited yet.
+        const loadedWeather = this.frameProperties[newFileIndex]?.weather;
+        if (loadedWeather) {
+            this.labelTool3D.parameters.weather_type = loadedWeather;
+            this.annotationObjects.annotatedWeatherTypes[newFileIndex] = loadedWeather;
         } else {
-            // set default weather type to CLOUDY (index 1)
+            // no weather on file (e.g. brand-new/empty frame) - fall back to the sequence default
             let sequence = Utils.getSequenceByName(this.availableSequences, this.currentSequence);
             this.labelTool3D.parameters.weather_type = sequence.default_weather_type;
             this.annotationObjects.annotatedWeatherTypes[newFileIndex] = sequence.default_weather_type;
+            if (!this.frameProperties[newFileIndex]) {
+                this.frameProperties[newFileIndex] = {};
+            }
+            this.frameProperties[newFileIndex].weather = sequence.default_weather_type;
         }
 
         $(".current").text((newFileIndex + 1) + "/" + this.numFrames);
