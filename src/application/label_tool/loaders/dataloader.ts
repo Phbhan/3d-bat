@@ -17,6 +17,18 @@ export class dataLoader implements AnnotationsLoader {
     getFilename = (labelTool: LabelTool, i: number) => labelTool.annotationFileNames[i];
 
     // Used when a frame has no annotation file yet (new/empty frame).
+    // The "visibility" attribute's key in annotationObj.attributes must match whatever
+    // name the config gives it (e.g. "Visibility"), since that's the key
+    // createDropDownAttribute() in tool_3d.ts uses to read/write the GUI dropdown.
+    // Hardcoding "visibility" here caused edits to silently not persist, because the
+    // dropdown was writing to a differently-cased key.
+    private getVisibilityAttributeKey(labelTool: LabelTool, objectClassIdx: number): string {
+        const datasetConfig = labelTool.config.datasets[labelTool.datasetArray.indexOf(labelTool.currentDataset)];
+        const classConfig = datasetConfig.classes[objectClassIdx];
+        const attrConfig = classConfig?.attributes?.find((a: any) => a.name?.toLowerCase() === "visibility");
+        return attrConfig ? attrConfig.name : "visibility";
+    }
+
     private defaultFrameMeta(labelTool: LabelTool, fileIndex: number): FrameMeta {
         const datasetConfig = labelTool.config.datasets[labelTool.datasetArray.indexOf(labelTool.currentDataset)];
         return {
@@ -94,11 +106,11 @@ export class dataLoader implements AnnotationsLoader {
             let objectClassIdx = labelTool.annotationClasses.getIndexByObjectClass(label.category);
             let defaultAttributes = labelTool.annotationObjects.getDefaultAttributesByClassIdx(objectClassIdx);
 
-            // orientation.Visibility ("CLEARLY"/"OCCLUDED") maps to the config's
             // "visibility" attribute
+            const visibilityKey = this.getVisibilityAttributeKey(labelTool, objectClassIdx);
             params.attributes = {
                 ...defaultAttributes,
-                visibility: orientation.Visibility ?? defaultAttributes["visibility"]
+                [visibilityKey]: box3d.visibility ?? defaultAttributes[visibilityKey]
             };
 
             labelTool.annotationObjects.set(labelTool.annotationObjects.__insertIndex, params);
@@ -123,10 +135,11 @@ export class dataLoader implements AnnotationsLoader {
                         annotationObj["class"]
                     );
                     let defaultAttributes = labelTool.annotationObjects.getDefaultAttributesByClassIdx(objectClassIdx);
+                    const visibilityKey = this.getVisibilityAttributeKey(labelTool, objectClassIdx);
 
-                    let visibility = defaultAttributes["visibility"];
-                    if (annotationObj["attributes"] && annotationObj["attributes"]["visibility"] !== undefined) {
-                        visibility = annotationObj["attributes"]["visibility"];
+                    let visibility = defaultAttributes[visibilityKey];
+                    if (annotationObj["attributes"] && annotationObj["attributes"][visibilityKey] !== undefined) {
+                        visibility = annotationObj["attributes"][visibilityKey];
                     }
 
                     // scale.x = length (forward axis), scale.y = width, scale.z = height
@@ -148,9 +161,9 @@ export class dataLoader implements AnnotationsLoader {
                             orientation: {
                                 rotationYaw: cube.rotation.z,
                                 rotationPitch: cube.rotation.y,
-                                rotationRoll: cube.rotation.x,
-                                Visibility: visibility
-                            }
+                                rotationRoll: cube.rotation.x
+                            },
+                            visibility: visibility
                         }
                     });
                 }
