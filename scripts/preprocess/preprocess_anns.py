@@ -8,10 +8,10 @@ import shutil
 import math
 
 CAMERAS = {
-    "CAM_FRONT": lambda x, y: x >= 0 and math.abs(x) < 20, 
-    "CAM_FRONT_RIGHT": lambda x, y: x >= 0 and y <= 0 and math.abs(y) < 20,
-    "CAM_FRONT_LEFT": lambda x, y: x >= 0 and y >= 0 and math.abs(y) < 20,
-    "CAM_BACK": lambda x, y: x < 0 and math.abs(x) < 20,
+    "CAM_FRONT": lambda x, y: x >= 0 and abs(x) < 20, 
+    "CAM_FRONT_RIGHT": lambda x, y: x >= 0 and y <= 0 and abs(y) < 20,
+    "CAM_FRONT_LEFT": lambda x, y: x >= 0 and y >= 0 and abs(y) < 20,
+    "CAM_BACK": lambda x, y: x < 0 and abs(x) < 20,
 }
 
 # Box transformation:
