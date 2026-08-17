@@ -71,8 +71,8 @@ export class dataLoader implements AnnotationsLoader {
             params.original.class = label.category;
 
             // This format stores plain Euler angles directly — no quaternion decomposition needed.
-            params.rotationYaw = orientation.rotationYaw;
-            params.original.rotationYaw = orientation.rotationYaw;
+            params.rotationYaw = orientation.rotationYaw + Math.PI / 2;
+            params.original.rotationYaw = orientation.rotationYaw+ Math.PI / 2;
             params.rotationPitch = orientation.rotationPitch;
             params.original.rotationPitch = orientation.rotationPitch;
             params.rotationRoll = orientation.rotationRoll;
@@ -159,7 +159,7 @@ export class dataLoader implements AnnotationsLoader {
                                 z: cube.position.z
                             },
                             orientation: {
-                                rotationYaw: cube.rotation.z,
+                                rotationYaw: cube.rotation.z - Math.PI / 2,
                                 rotationPitch: cube.rotation.y,
                                 rotationRoll: cube.rotation.x
                             },
