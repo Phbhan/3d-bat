@@ -2,6 +2,9 @@ export DATA_INPUT_PATH=/home/hanpb2/workspace/Data/Data_PNK/500h/20260711_1512_V
 export DATA_PROCESSED_PATH=/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331
 export EXTRINSIC_PATH=/home/hanpb2/workspace/Data/Data_PNK/calib/VF6_03/VF6_03_Extrinsics.json 
 export INTRINSIC_PATH=/home/hanpb2/workspace/Data/Data_PNK/calib/VF6_03/VF6_03_Intrinsics.json
+export NEW_EXTRINSIC_PATH=/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331/VF6_03_Extrinsics.json
+export NEW_INTRINSIC_PATH=/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331/VF6_03_Intrinsics.json
+export LIDAR_ORIGIN=back
 
 # Merge multiple lidar data into unified dcp file
 mkdir -p $DATA_PROCESSED_PATH/point_clouds/LIDAR_TOP
@@ -11,7 +14,7 @@ python scripts/preprocess/merge_multi_lidar.py \
     --out_dir_pcd $DATA_PROCESSED_PATH/point_clouds/LIDAR_TOP \
     --out_dir_bin $DATA_PROCESSED_PATH/point_clouds/LIDAR_TOP_BIN \
     --out_dir_laz $DATA_PROCESSED_PATH/point_clouds/LIDAR_TOP_LAZ \
-    --origin center \
+    --lidar_origin center \
     --visualize \
     --visualize_only \
     --visualize_ts 1783757599-099982977
@@ -19,11 +22,12 @@ python scripts/preprocess/merge_multi_lidar.py \
 mkdir -p $DATA_PROCESSED_PATH/point_clouds_lidar/LIDAR_TOP
 python scripts/preprocess/merge_multi_lidar.py \
     --extr $EXTRINSIC_PATH \
+    --out_extrinsics $NEW_EXTRINSIC_PATH \
     --lidar_root $DATA_INPUT_PATH/LIDAR \
     --out_dir_pcd $DATA_PROCESSED_PATH/point_clouds_lidar/LIDAR_TOP \
     --out_dir_bin $DATA_PROCESSED_PATH/point_clouds_lidar/LIDAR_TOP_BIN \
     --out_dir_laz $DATA_PROCESSED_PATH/point_clouds_lidar/LIDAR_TOP_LAZ \
-    --origin back \
+    --lidar_origin $LIDAR_ORIGIN \
     --visualize \
     --visualize_only \
     --visualize_ts 1783757599-099982977
@@ -39,22 +43,23 @@ python scripts/preprocess/undistort_images.py \
   --images_root $DATA_PROCESSED_PATH/images_raw \
   --out_root $DATA_PROCESSED_PATH/images_pinhole \
   --intr_path $INTRINSIC_PATH \
-  --extr_path $EXTRINSIC_PATH \
+  --new_intr_path $NEW_INTRINSIC_PATH \
   --alpha 0
 
 python scripts/preprocess/build_calib_json.py \
-    --extr_path $EXTRINSIC_PATH \
-    --intr_path $DATA_PROCESSED_PATH/images_pinhole/new_intrinsics.json \
+    --extr_path $NEW_EXTRINSIC_PATH \
+    --intr_path $NEW_INTRINSIC_PATH \
     --input_pred_dir "/lustre/scratch/client/vinfast/groups/l4/hanpb2/bevfusion/input_data/20260711_1512_VF6_03_1783757531_1783759331" \
     --raw_root  $DATA_INPUT_PATH \
     --primary_lidar LIDAR_TOP \
+    --lidar_origin $LIDAR_ORIGIN \
     --no_camera_offset \
     --global_coord_mode utm \
     --out_path  $DATA_PROCESSED_PATH/input_data.json
 
 
-rsync -avP 'input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331/point_clouds_lidar' \
-            'superpod:/lustre/scratch/client/vinfast/groups/l4/hanpb2/bevfusion/input_data/20260711_1512_VF6_03_1783757531_1783759331'
+rsync -avP '/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331/point_clouds_lidar/LIDAR_TOP' \
+            'superpod:/lustre/scratch/client/vinfast/groups/l4/hanpb2/bevfusion/input_data/20260711_1512_VF6_03_1783757531_1783759331/point_clouds'
 # infer
 rsync -avP 'superpod:/lustre/scratch/client/vinfast/groups/l4/hanpb2/bevfusion/output/20260711_1512_VF6_03_1783757531_1783759331/annotations' \
             '/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331'

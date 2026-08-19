@@ -1,57 +1,3 @@
-#!/usr/bin/env python3
-"""
-Build a per-frame NAVSIM-like JSON from a single raw log folder, with REAL
-lidar_path / camera data_path and REAL ego2global pose (from IMU/NAV).
-
-Expected folder layout (matches what you described):
-
-    <raw_root>/
-        LIDAR/LIDAR_TOP/1783757599-099982977.laz          <- lidar frames (timestamp = filename)
-        CAMERA/CAM_P_L/1783757599-031618213.jpg            <- one folder per camera
-        CAMERA/CAM_P_FL/...
-        CAMERA/CAM_P_FR/...
-        CAMERA/CAM_P_LB/...
-        CAMERA/CAM_P_RB/...
-        OTHERS/IMU/*.csv   (or OTHER/IMU/*.csv)             <- pose source
-        OTHERS/NAV/*.csv   (optional, for lat/lon translation)
-
-For every LIDAR_TOP frame:
-    1. Find the nearest image (by timestamp) in every camera folder found
-       under CAMERA/.
-    2. Find the nearest IMU/NAV row (by timestamp) and derive
-       ego2global_translation / ego2global_rotation from it -- once for the
-       LiDAR keyframe timestamp, and AGAIN for each camera's own matched
-       image timestamp (they are not the same instant).
-    3. Compute sensor2ego, sensor2lidar, camera_intrinsics, lidar2ego from
-       the intrinsics/extrinsics calibration files.
-
-       sensor2lidar is computed by bridging through the GLOBAL frame using
-       each sensor's own ego pose at its own capture time, exactly like
-       mmdet3d's `obtain_sensor2top`:
-
-           sensor -> ego(sensor_time) -> global -> ego(lidar_time) -> lidar
-
-       This matters because the LiDAR and each camera do NOT fire at the
-       same instant (see CAMERA_OFFSETS_MS below), and the vehicle keeps
-       moving in that gap. A naive `R_lidar2ego.T @ R_cam2ego` (bridging
-       through a single shared ego frame) silently assumes ego pose is
-       identical at both timestamps, which is wrong whenever the vehicle is
-       moving.
-
-Camera folder names (e.g. CAM_P_L, CAM_P_FL, CAM_P_FR, CAM_P_LB, CAM_P_RB)
-are used as-is to look up intrinsics/extrinsics, and renamed to a friendlier
-output key via RAW2OUT_CAM if a mapping exists (otherwise the raw folder
-name is used as the output key directly, so any camera folder is handled
-automatically -- you aren't limited to the ones listed above).
-
-Usage:
-    python build_synced_frames_json.py \
-        --raw_root "500h/20260711_1512_VF6_03_1783757531_1783759331" \
-        --intr_path VF6_03_Intrinsics.json \
-        --extr_path VF6_03_Extrinsics.json \
-        --primary_lidar LIDAR_TOP \
-        --out_path 20260711_1512_VF6_03.json
-"""
 import argparse
 import csv
 import json
@@ -421,32 +367,44 @@ def compute_sensor2lidar(
     e2g_r_s_mat: np.ndarray, e2g_t_s: np.ndarray,
     R_l2e: np.ndarray, t_l2e: np.ndarray,
     e2g_r_mat: np.ndarray, e2g_t: np.ndarray,
+    lidar_origin: str = "lidar_top",
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Mirrors mmdet3d's `obtain_sensor2top`: transform a sensor reading into the
-    LIDAR_TOP frame by bridging through GLOBAL, using each sensor's own ego
-    pose at its own capture timestamp -- NOT a single shared ego frame.
+    Compute sensor->reference-frame while preserving the per-sensor timestamp
+    motion compensation used by mmdet3d's ``obtain_sensor2top``.
 
-        sensor -> ego(sensor_time) -> global -> ego(lidar_time) -> lidar
+    Default (``lidar_origin='lidar_top'``):
+        sensor -> ego(sensor_time) -> global -> ego(lidar_time) -> LIDAR_TOP
 
-    Args:
-        R_s2e_s, t_s2e_s: sensor->ego (static calibration) for the source sensor
-                           (e.g. a camera).
-        e2g_r_s_mat, e2g_t_s: ego->global at the SOURCE sensor's own capture time.
-        R_l2e, t_l2e: lidar->ego (static calibration) for LIDAR_TOP (reference sensor).
-        e2g_r_mat, e2g_t: ego->global at the LIDAR keyframe time (the sample's
-                           reference timestamp).
+    ``lidar_origin='back'``:
+        ``back`` is the vehicle ego frame, so the final LIDAR_TOP->ego step is
+        removed. The result is therefore:
 
-    Returns:
-        (sensor2lidar_rotation, sensor2lidar_translation) such that
-        p_lidar = p_sensor @ sensor2lidar_rotation.T + sensor2lidar_translation
+        sensor -> ego(sensor_time) -> global -> ego(lidar_time)
+
+    This is important when the merged point cloud was also generated with
+    ``merge_multi_lidar.py --origin back``: the point cloud and sensor2lidar
+    coordinates then use exactly the same reference origin.
+
+    The returned transform follows the dataset convention:
+        p_ref = p_sensor @ rotation.T + translation
     """
-    inv_e2g_r_mat = np.linalg.inv(e2g_r_mat)
-    inv_l2e_r_mat = np.linalg.inv(R_l2e)
+    if lidar_origin not in {"lidar_top", "back"}:
+        raise ValueError(f"Unsupported lidar_origin '{lidar_origin}'")
 
-    R = (R_s2e_s.T @ e2g_r_s_mat.T) @ (inv_e2g_r_mat.T @ inv_l2e_r_mat.T)
-    T = (t_s2e_s @ e2g_r_s_mat.T + e2g_t_s) @ (inv_e2g_r_mat.T @ inv_l2e_r_mat.T)
-    T = T - (e2g_t @ (inv_e2g_r_mat.T @ inv_l2e_r_mat.T) + t_l2e @ inv_l2e_r_mat.T)
+    inv_e2g_r_mat = np.linalg.inv(e2g_r_mat)
+
+    if lidar_origin == "lidar_top":
+        # Final conversion: ego(lidar_time) -> LIDAR_TOP.
+        inv_l2e_r_mat = np.linalg.inv(R_l2e)
+        R = (R_s2e_s.T @ e2g_r_s_mat.T) @ (inv_e2g_r_mat.T @ inv_l2e_r_mat.T)
+        T = (t_s2e_s @ e2g_r_s_mat.T + e2g_t_s) @ (inv_e2g_r_mat.T @ inv_l2e_r_mat.T)
+        T = T - (e2g_t @ (inv_e2g_r_mat.T @ inv_l2e_r_mat.T) + t_l2e @ inv_l2e_r_mat.T)
+    else:
+        # ``back`` is the vehicle ego frame. No LIDAR_TOP calibration is
+        # applied at the end: the reference frame is already ego.
+        R = (R_s2e_s.T @ e2g_r_s_mat.T) @ inv_e2g_r_mat.T
+        T = (t_s2e_s @ e2g_r_s_mat.T + e2g_t_s) @ inv_e2g_r_mat.T - e2g_t @ inv_e2g_r_mat.T
 
     return R.T.astype(np.float32), T.astype(np.float32)
 
@@ -464,6 +422,17 @@ def main() -> None:
 
     ap.add_argument("--lidar_subdir", default="LIDAR/LIDAR_TOP", help="Path (relative to raw_root) to the lidar frames.")
     ap.add_argument("--primary_lidar", default="LIDAR_TOP", help="Key used to look up this lidar in the extrinsics JSON.")
+    ap.add_argument(
+        "--lidar_origin",
+        choices=["lidar_top", "back"],
+        default="lidar_top",
+        help=(
+            "Reference frame used by sensor2lidar and by the merged point cloud. "
+            "Default is LIDAR_TOP. With 'back', the reference origin is the "
+            "vehicle ego/back frame, so sensor2lidar is sensor->ego and "
+            "lidar2ego becomes identity for the merged cloud."
+        ),
+    )
     ap.add_argument("--camera_subdir", default="CAMERA", help="Path (relative to raw_root) containing one folder per camera.")
     ap.add_argument("--trans_scale", type=float, default=0.001)
     ap.add_argument("--location", default="phenikaa")
@@ -537,10 +506,22 @@ def main() -> None:
         args.global_coord_mode, lat0, lon0, int(args.global_epsg) if int(args.global_epsg) > 0 else None
     )
     print(f"[INFO] Global coord mode: {args.global_coord_mode}  CRS: {global_crs_name}")
+    print(f"[INFO] sensor2lidar reference origin: {args.lidar_origin}")
 
     # --- Static lidar2ego (same across all frames) ---
     R_le, t_le = pose_sensor_to_ego_from_extr(extr, args.primary_lidar, args.trans_scale, sensor_kind="lidar")
-    q_le = rotmat_to_quat_wxyz(R_le)
+
+    # The merged cloud's reference frame is selected by --lidar_origin.
+    # For the default LIDAR_TOP origin, keep the real LIDAR_TOP->ego
+    # calibration. For --lidar_origin back, the merged cloud itself is already
+    # in the vehicle ego/back frame, so its lidar2ego transform is identity.
+    if args.lidar_origin == "back":
+        R_output_lidar2ego = np.eye(3, dtype=np.float32)
+        t_output_lidar2ego = np.zeros(3, dtype=np.float32)
+    else:
+        R_output_lidar2ego = R_le
+        t_output_lidar2ego = t_le
+    q_le = rotmat_to_quat_wxyz(R_output_lidar2ego)
 
     # --- Pre-compute per-camera static sensor2ego + intrinsics only.
     # sensor2lidar is NOT static (it depends on ego motion between the
@@ -612,6 +593,7 @@ def main() -> None:
                 e2g_r_s_mat, t_ego2global_c,
                 R_le, t_le,
                 e2g_r_mat, t_ego2global,
+                lidar_origin=args.lidar_origin,
             )
 
             out_name = static_info["out_name"]
@@ -635,7 +617,7 @@ def main() -> None:
             "lidar_path": lidar_rel,
             "timestamp_ns": int(lidar_ns),
             "cams": cams,
-            "lidar2ego_translation": t_le.tolist(),
+            "lidar2ego_translation": t_output_lidar2ego.tolist(),
             "lidar2ego_rotation": q_le.tolist(),
             # frame-level reference pose: LIDAR_TOP's own ego2global.
             "ego2global_translation": e2g_t,

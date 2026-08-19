@@ -30,6 +30,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from tqdm import tqdm
 
 CAMERAS = ["CAM_P_F", "CAM_P_FR", "CAM_P_RB", "CAM_P_FL", "CAM_P_LB"]
 IMG_EXTS = (".jpg", ".jpeg", ".png")
@@ -64,7 +65,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--images_root", required=True, type=Path,
                      help="Folder containing CAM_P_F/, CAM_P_FR/, CAM_P_RB/, CAM_P_FL/, CAM_P_LB/")
     ap.add_argument("--intr_path", required=True, type=Path)
-    ap.add_argument("--extr_path", type=Path, default=None)
+    ap.add_argument("--new_intr_path", type=Path, default=None)
     ap.add_argument("--out_root", required=True, type=Path)
     ap.add_argument("--alpha", type=float, default=0.0,
                      help="0 = crop all invalid pixels, 1 = keep all pixels (black corners)")
@@ -115,7 +116,7 @@ def main() -> None:
         out_folder.mkdir(parents=True, exist_ok=True)
 
         n_ok, n_fail = 0, 0
-        for img_path in images:
+        for img_path in tqdm(images):
             out_path = out_folder / img_path.name
             if out_path.exists() and not args.overwrite:
                 n_ok += 1
@@ -138,16 +139,12 @@ def main() -> None:
         }
         print(f"[OK] {cam}: {n_ok} undistorted, {n_fail} failed -> {out_folder}")
 
-    intr_out_path = args.out_root / "new_intrinsics.json"
+    if args.new_intr_path:
+        intr_out_path = args.new_intr_path
+    else:
+        intr_out_path = args.out_root / "new_intrinsics.json"
     intr_out_path.write_text(json.dumps(new_intr, indent=2))
     print(f"[DONE] New intrinsics written to {intr_out_path}")
-
-    if args.extr_path is not None:
-        extr = json.loads(args.extr_path.read_text())
-        extr_out_path = args.out_root / "extrinsics.json"
-        extr_out_path.write_text(json.dumps(extr, indent=2))
-        print(f"[DONE] Extrinsics copied unchanged to {extr_out_path}")
-        print("Note: undistortion does not change sensor->ego extrinsics, so these are passed through as-is.")
 
 
 if __name__ == "__main__":
