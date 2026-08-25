@@ -1084,6 +1084,11 @@ class LabelTool {
         this.weatherTypes = [];
         this.cubeArray = [];
 
+        this.pointCloudLoaded = false;
+        this.labelTool3D.pointCloudLoadingPromise = null;
+        this.labelTool3D.pointCloudScanMap = [];
+        this.labelTool3D.pointCloudScanNoGroundList = [];
+
         for (let i = 0; i < this.annotationObjects.contents[this.currentFrameIndex].length; i++) {
             let annotationObj = this.annotationObjects.contents[this.currentFrameIndex][i];
             this.labelTool3D.guiOptions.removeFolder(annotationObj["class"] + ' ' + annotationObj["trackId"]);
@@ -1119,6 +1124,7 @@ class LabelTool {
         this.labelToolImage.paperArray = [];
         this.labelToolImage.paperArrayAll = [];
         this.labelToolImage.imageArray = [];
+        this.labelToolImage.imageArrayAll = [];
         this.labelToolImage.imageHeightOriginal = -1;
         this.labelToolImage.imageWidthOriginal = -1;
         this.labelToolImage.canvasElemBEV = undefined;
