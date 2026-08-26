@@ -1021,9 +1021,6 @@ class LabelTool3D {
 
     }
 
-    // Returns the world-space center of an annotation box mesh. The box geometry is
-    // a unit cube translated so it spans local z in [0, 1], and position.z is locked
-    // to the ground (0), so the world center sits half the box height above position.
     static getObjectCenter(mesh: Mesh): Vector3 {
         return new Vector3(
             mesh.position.x,

@@ -515,7 +515,7 @@ def main():
 
     shifted_lidar_extrinsics = shift_extrinsics(lidar_transform_matrices, args.lidar_origin, args.anchor)
     output_extrinsics = {**all_transform_matrices, **shifted_lidar_extrinsics}
-    out_extrinsics_path = Path(args.out_extrinsics) if args.out_extrinsics else out_dir_pcd.parent / f"extrinsics_{args.origin}.json"
+    out_extrinsics_path = Path(args.out_extrinsics) if args.out_extrinsics else out_dir_pcd.parent / f"extrinsics_{args.lidar_origin}.json"
     save_extrinsics(out_extrinsics_path, output_extrinsics)
     logger.info(
         "Saved extrinsics for %d sensors to: %s (%d LIDAR_* shifted, %d others unchanged)",
@@ -554,7 +554,7 @@ def main():
             target_ns, lidar_indexes, transform_matrices,
             out_pcd=None, out_bin=None, out_laz=None,
             max_time_diff_sec=args.max_dt, collect_sensor_points=True,
-            origin=args.origin, anchor_lidar=args.anchor,
+            origin=args.lidar_origin, anchor_lidar=args.anchor,
         )
         if not sensor_points:
             logger.info("No points to show.")

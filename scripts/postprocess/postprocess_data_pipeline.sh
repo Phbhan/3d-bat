@@ -1,7 +1,9 @@
-export DATA_PROCESSED_PATH=/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331
-export OUTPUT_PATH=/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/output/vf6_03_pnk/20260711_1512_VF6_03_1783757531_1783759331
-
 mkdir -p $OUTPUT_PATH
+
+
+python scripts/postprocess/merge_sequences.py \
+    --split-root $DATA_PROCESSED_PATH/split \
+    --output-root $DATA_PROCESSED_PATH
 
 python scripts/postprocess/postprocess_anns.py \
     --input-root $DATA_PROCESSED_PATH \

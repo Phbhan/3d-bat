@@ -4,13 +4,58 @@
       "name": "hanpb2",
       "sequences": [
         {
-          "name": "20260711_1512_VF6_03_1783757531_1783759331",
-          "num_frames": 100,
+          "name": "20260711_1512_VF6_03_1783757531_1783759331/split/000",
+          "num_frames": 20,
+          "default_weather_type": "SUNNY"
+        },
+        {
+          "name": "20260711_1512_VF6_03_1783757531_1783759331/split/001",
+          "num_frames": 20,
+          "default_weather_type": "SUNNY"
+        },
+        {
+          "name": "20260711_1512_VF6_03_1783757531_1783759331/split/002",
+          "num_frames": 20,
+          "default_weather_type": "SUNNY"
+        },
+        {
+          "name": "20260711_1512_VF6_03_1783757531_1783759331/split/003",
+          "num_frames": 20,
+          "default_weather_type": "SUNNY"
+        },
+        {
+          "name": "20260711_1512_VF6_03_1783757531_1783759331/split/004",
+          "num_frames": 20,
+          "default_weather_type": "SUNNY"
+        },
+        {
+          "name": "20260711_1512_VF6_03_1783757531_1783759331/split/005",
+          "num_frames": 20,
+          "default_weather_type": "SUNNY"
+        },
+        {
+          "name": "20260711_1512_VF6_03_1783757531_1783759331/split/006",
+          "num_frames": 20,
+          "default_weather_type": "SUNNY"
+        },
+        {
+          "name": "20260711_1512_VF6_03_1783757531_1783759331/split/007",
+          "num_frames": 20,
+          "default_weather_type": "SUNNY"
+        },
+        {
+          "name": "20260711_1512_VF6_03_1783757531_1783759331/split/008",
+          "num_frames": 20,
+          "default_weather_type": "SUNNY"
+        },
+        {
+          "name": "20260711_1512_VF6_03_1783757531_1783759331/split/009",
+          "num_frames": 20,
           "default_weather_type": "SUNNY"
         }
       ],
-      "default_sequence": "20260711_1512_VF6_03_1783757531_1783759331",
-      "num_frames": 100,
+      "default_sequence": "20260711_1512_VF6_03_1783757531_1783759331/split/000",
+      "num_frames": 20,
       "classes": [
         {
           "name": "CAR",
@@ -132,9 +177,9 @@
           "channel": "CAM_BACK"
         }
       ],
-      "weather_type": [
-        "SUNNY",
+      "weather_types": [
         "CLOUDY",
+        "SUNNY",
         "WINDY",
         "RAINY",
         "FOGGY",

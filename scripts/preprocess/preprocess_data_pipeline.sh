@@ -1,11 +1,3 @@
-export DATA_INPUT_PATH=/home/hanpb2/workspace/Data/Data_PNK/500h/20260711_1512_VF6_03_1783757531_1783759331/
-export DATA_PROCESSED_PATH=/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331
-export EXTRINSIC_PATH=/home/hanpb2/workspace/Data/Data_PNK/calib/VF6_03/VF6_03_Extrinsics.json 
-export INTRINSIC_PATH=/home/hanpb2/workspace/Data/Data_PNK/calib/VF6_03/VF6_03_Intrinsics.json
-export NEW_EXTRINSIC_PATH=/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331/VF6_03_Extrinsics.json
-export NEW_INTRINSIC_PATH=/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331/VF6_03_Intrinsics.json
-export LIDAR_ORIGIN=back
-
 # Merge multiple lidar data into unified dcp file
 mkdir -p $DATA_PROCESSED_PATH/point_clouds/LIDAR_TOP
 python scripts/preprocess/merge_multi_lidar.py \
@@ -44,7 +36,8 @@ python scripts/preprocess/undistort_images.py \
   --out_root $DATA_PROCESSED_PATH/images_pinhole \
   --intr_path $INTRINSIC_PATH \
   --new_intr_path $NEW_INTRINSIC_PATH \
-  --alpha 0
+  --alpha 0 --overwrite
+
 
 python scripts/preprocess/build_calib_json.py \
     --extr_path $NEW_EXTRINSIC_PATH \
@@ -60,6 +53,13 @@ python scripts/preprocess/build_calib_json.py \
 
 rsync -avP '/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331/point_clouds_lidar/LIDAR_TOP' \
             'superpod:/lustre/scratch/client/vinfast/groups/l4/hanpb2/bevfusion/input_data/20260711_1512_VF6_03_1783757531_1783759331/point_clouds'
+
+rsync -avP '/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331/images_pinhole' \
+            'superpod:/lustre/scratch/client/vinfast/groups/l4/hanpb2/bevfusion/input_data/20260711_1512_VF6_03_1783757531_1783759331/images'
+
+rsync -avP '/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331/input_data.json' \
+            'superpod:/lustre/scratch/client/vinfast/groups/l4/hanpb2/bevfusion/input_data/20260711_1512_VF6_03_1783757531_1783759331'
+
 # infer
 rsync -avP 'superpod:/lustre/scratch/client/vinfast/groups/l4/hanpb2/bevfusion/output/20260711_1512_VF6_03_1783757531_1783759331/annotations' \
             '/home/hanpb2/workspace/Data/DataOD3D/code/3d-bat/input/hanpb2/20260711_1512_VF6_03_1783757531_1783759331'
@@ -80,5 +80,16 @@ python scripts/preprocess/preprocess_anns.py \
         --rename \
         --modify-box \
         --x-offset -1.403
-python scripts/preprocess/create_file_name_list.py \
-    --input_folder_path_drive $DATA_PROCESSED_PATH
+
+mkdir -p $DATA_PROCESSED_PATH/split
+python scripts/preprocess/split_sequences.py \
+    --input $DATA_PROCESSED_PATH \
+    --output $DATA_PROCESSED_PATH/split \
+    --num-data 20
+
+for split_dir in "$DATA_PROCESSED_PATH"/split/*/; do
+    echo "Processing: $split_dir"
+
+    python scripts/preprocess/create_file_name_list.py \
+        --input_folder_path_drive "$split_dir"
+done

@@ -116,6 +116,7 @@ def main() -> None:
         out_folder.mkdir(parents=True, exist_ok=True)
 
         n_ok, n_fail = 0, 0
+        print("Camera: ", cam)
         for img_path in tqdm(images):
             out_path = out_folder / img_path.name
             if out_path.exists() and not args.overwrite:
