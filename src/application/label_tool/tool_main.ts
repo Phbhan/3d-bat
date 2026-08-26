@@ -276,7 +276,17 @@ class LabelTool {
         this.addEventHandler();
     }
 
+    private navButtonHandlersInitialized = false;
+
     private addEventHandler() {
+        // start() runs again on every sequence/dataset change; without this guard the
+        // prev/next buttons accumulate one extra listener per switch, so a single click
+        // ends up calling previousFrame()/nextFrame() multiple times.
+        if (this.navButtonHandlersInitialized) {
+            return;
+        }
+        this.navButtonHandlersInitialized = true;
+
         document.getElementById('left-btn')!.addEventListener('click', () => {
             this.previousFrame();
         });
@@ -1073,6 +1083,20 @@ class LabelTool {
             this.labelTool3D.scene.remove(obj);
         }
 
+        if (this.labelTool3D.transformControls !== undefined) {
+            this.labelTool3D.transformControls.detach();
+            this.labelTool3D.transformControls = undefined;
+        }
+        this.labelTool3D.selectedMesh = undefined;
+
+        for (let frameIdx = 0; frameIdx < this.annotationObjects.contents.length; frameIdx++) {
+            const frameObjects = this.annotationObjects.contents[frameIdx] ?? [];
+            for (let i = 0; i < frameObjects.length; i++) {
+                let annotationObj = frameObjects[i];
+                this.labelTool3D.guiOptions.removeFolder(annotationObj["class"] + ' ' + annotationObj["trackId"]);
+            }
+        }
+
         // base label tool
         this.currentFrameIndex = 0;
         this.fileNames = [];
@@ -1088,11 +1112,6 @@ class LabelTool {
         this.labelTool3D.pointCloudLoadingPromise = null;
         this.labelTool3D.pointCloudScanMap = [];
         this.labelTool3D.pointCloudScanNoGroundList = [];
-
-        for (let i = 0; i < this.annotationObjects.contents[this.currentFrameIndex].length; i++) {
-            let annotationObj = this.annotationObjects.contents[this.currentFrameIndex][i];
-            this.labelTool3D.guiOptions.removeFolder(annotationObj["class"] + ' ' + annotationObj["trackId"]);
-        }
 
         this.annotationObjects.contents = [];
         $(".class-tooltip").remove();
@@ -1134,10 +1153,6 @@ class LabelTool {
         $(".frame-selector__frames").empty();
     }
 
-    // Like resetTool(), but for switching the active camera channel: clears out
-    // annotation-derived state (boxes, sprites, GUI folders, image canvases) so the new
-    // channel's own annotation set loads cleanly, while leaving the point cloud and HD
-    // map — which are shared across every camera channel — untouched in the scene.
     private resetForCameraChannelSwitch() {
         for (let i = this.labelTool3D.scene.children.length - 1; i >= 0; i--) {
             let obj = this.labelTool3D.scene.children[i];
@@ -1192,10 +1207,6 @@ class LabelTool {
         $(".frame-selector__frames").empty();
     }
 
-    // Switches the single active camera channel: reloads that channel's own images
-    // (from images_{channel}/) and annotations (from annotations_{channel}/, via
-    // FileOperations — see the note in file_operations.ts), while leaving the point
-    // cloud and HD map exactly as they were since those are shared across channels.
     changeCameraChannel(channelName: string) {
         if (!channelName || channelName === this.currentCameraChannelName) {
             return;

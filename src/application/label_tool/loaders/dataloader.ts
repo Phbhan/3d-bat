@@ -11,6 +11,7 @@ interface FrameMeta {
     timestamp: number;
     index: number;
     weather: string;
+    nuscenes_format?: boolean;
 }
 
 export class dataLoader implements AnnotationsLoader {
@@ -55,7 +56,8 @@ export class dataLoader implements AnnotationsLoader {
             cam_pos: frameMeta.cam_pos ?? "",
             timestamp: frameMeta.timestamp ?? fileIndex,
             index: frameMeta.index ?? fileIndex,
-            weather: frameMeta.weather ?? ""
+            weather: frameMeta.weather ?? "",
+            nuscenes_format: frameMeta.nuscenes_format ?? false
         };
 
         labels.forEach((label: any, idx: number) => {
@@ -71,8 +73,14 @@ export class dataLoader implements AnnotationsLoader {
             params.original.class = label.category;
 
             // This format stores plain Euler angles directly — no quaternion decomposition needed.
-            params.rotationYaw = orientation.rotationYaw + Math.PI / 2;
-            params.original.rotationYaw = orientation.rotationYaw+ Math.PI / 2;
+            if (frameMeta.nuscenes_format == true) {
+                params.rotationYaw = orientation.rotationYaw + Math.PI / 2;
+                params.original.rotationYaw = orientation.rotationYaw + Math.PI / 2;
+            }
+            else {
+                params.rotationYaw = orientation.rotationYaw;
+                params.original.rotationYaw = orientation.rotationYaw;
+            }
             params.rotationPitch = orientation.rotationPitch;
             params.original.rotationPitch = orientation.rotationPitch;
             params.rotationRoll = orientation.rotationRoll;
@@ -159,7 +167,7 @@ export class dataLoader implements AnnotationsLoader {
                                 z: cube.position.z
                             },
                             orientation: {
-                                rotationYaw: cube.rotation.z - Math.PI / 2,
+                                rotationYaw: cube.rotation.z,
                                 rotationPitch: cube.rotation.y,
                                 rotationRoll: cube.rotation.x
                             },
@@ -177,6 +185,7 @@ export class dataLoader implements AnnotationsLoader {
                 timestamp: frameMeta.timestamp,
                 index: frameMeta.index,
                 weather: frameMeta.weather,
+                nuscenes_format: frameMeta.nuscenes_format,
                 labels: labels
             };
             annotationFiles.push(JSON.stringify(frameJSON));

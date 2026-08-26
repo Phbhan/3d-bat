@@ -517,7 +517,6 @@ class AnnotationObject {
         this.contents[fileIndex].splice(index, 1);
         delete this.labelTool.cubeArray[fileIndex][index];
         this.labelTool.cubeArray[fileIndex].splice(index, 1);
-        this.__insertIndex--;
         this.select(-1);
     }
 

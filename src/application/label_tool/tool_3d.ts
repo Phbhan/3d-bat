@@ -2318,8 +2318,8 @@ class LabelTool3D {
             }
             const groundPointMouseUp = groundUpObject[0].point;
 
-            const insertIndex = this.getInsertIndex();
-            const trackId = this.getTrackId();
+            const insertIndex = this.getInsertIndex(this.labelTool.currentFrameIndex, true);
+            const trackId = this.getTrackId(true);
             this.setClickedObjectIndexPrevious();
             const objectClass = this.annotationClasses.getCurrentClass();
             const pos = new Vector3(
@@ -2498,8 +2498,16 @@ class LabelTool3D {
     }
 
 
-    getInsertIndex(fileIndex: number = this.labelTool.currentFrameIndex): number {
-        if (this.annotationObjects.__selectionIndexCurrentFrame === -1 || fileIndex !== this.labelTool.currentFrameIndex) {
+    // forNewObject=true forces a brand-new slot (append) / brand-new track ID, ignoring
+    // whatever object currently happens to be selected. Without it, drawing a new box
+    // while an existing object was selected would silently reuse that object's index
+    // and track ID — overwriting its data instead of creating an independent object,
+    // which is also why the "new" box's mesh never lined up with what you could drag
+    // (the mesh at that slot was still the old object's mesh).
+    // Tracking (trackOneDirection) deliberately wants the old reuse-selection behavior,
+    // so it keeps calling this with forNewObject left at its default of false.
+    getInsertIndex(fileIndex: number = this.labelTool.currentFrameIndex, forNewObject: boolean = false): number {
+        if (forNewObject || this.annotationObjects.__selectionIndexCurrentFrame === -1 || fileIndex !== this.labelTool.currentFrameIndex) {
             return this.annotationObjects.contents[fileIndex].length;
         } else {
             return this.annotationObjects.__selectionIndexCurrentFrame;
@@ -2563,8 +2571,8 @@ class LabelTool3D {
         }
     }
 
-    getTrackId(): string {
-        if (this.annotationObjects.__selectionIndexCurrentFrame === -1) {
+    getTrackId(forNewObject: boolean = false): string {
+        if (forNewObject || this.annotationObjects.__selectionIndexCurrentFrame === -1) {
             return this.annotationObjects.getNextTrackID();
         }
         else {
@@ -2641,12 +2649,7 @@ class LabelTool3D {
         let edges = new LineSegments(edgesGeometry, edgesMaterial);
         cubeMesh.add(edges);
 
-        // Direction arrow: cone on the front face showing which way the box points.
-        // "length" (scale.x) is the forward axis (see cubeLength.onChange), so the
-        // arrow sits at local x (front face) and is rotated to point along +x.
-        // Local position scales with the parent automatically, so it stays glued to
-        // the front face as length/width/height change; the counter-scale below only
-        // keeps the cone's *shape* from stretching, using the scale at creation time.
+      
         const arrowGeometry = new ConeBufferGeometry(0.15, 0.8, 8);
         arrowGeometry.rotateZ(-Math.PI / 2);
         const arrowMaterial = new MeshBasicMaterial({color: 0xffff00});
@@ -2733,7 +2736,6 @@ class LabelTool3D {
                 $("#left-btn").css("left", window.innerWidth / 3);
                 this.showHelperViews(pos.x, pos.y, pos.z);
 
-                this.annotationObjects.__insertIndex++;
                 this.annotationObjects.select(insertIndex);
                 if (this.labelTool.frameAnnotationType === "continuous_sequence") {
                     let interpolationModeCheckbox = document.getElementById("interpolation-checkbox");
@@ -3693,6 +3695,8 @@ class LabelTool3D {
         this.labelTool.weatherTypes = this.labelTool.config.datasets[this.labelTool.currentDatasetIdx].weather_type;
 
         this.labelTool.setFileNames()
+
+        this.initGuiBoundingBoxAnnotations();
 
         this.labelTool.start();
 
