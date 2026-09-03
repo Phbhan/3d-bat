@@ -82,6 +82,9 @@
 - [x] Open source
 - [x] Customizable and extendable
 - [x] Zooming into images
+- [x] Bird's Eye View (BEV) image panel with box projection
+- [x] Multi-camera channel switching
+- [x] Frame info dashboard (image/annotation/lidar file names, frame metadata)
 
 ![Comparison](./assets/textures/comparison.png)
 
@@ -154,7 +157,50 @@ Instructions for data annotation can be found [here](./instructions.md).
 
 # Commands and Shortcuts 👨🏽‍💻
 
-See [Commands and Shortcuts](./docs/commands.md) for more details.
+See [Commands and Shortcuts](./docs/commands.md) for the full write-up. Quick reference below.
+
+### General navigation
+
+| Shortcut | Action |
+|---|---|
+| `N` | Next frame |
+| `P` | Previous frame |
+| `Space` | Play/pause sequence (no object selected) · cycle transform mode (object selected) |
+| `C` | Switch view (orthographic ↔ perspective) |
+| `F` | Toggle frame info dashboard |
+| `Tab` | Select next object |
+| `Shift` + `Tab` | Select previous object |
+| `0`–`9` | Select annotation class by index |
+| `Ctrl` + `Z` | Undo last operation |
+
+### Selected-object controls
+
+| Shortcut | Action |
+|---|---|
+| `ALT` + `T` | Switch to translate mode |
+| `ALT` + `R` | Switch to rotate mode |
+| `ALT` + `S` | Switch to scale mode |
+| `W` / `A` / `S` / `D` | Move selected box (translate mode) |
+| `Q` / `E` | Rotate/scale on the third axis, depending on mode |
+| `X` | Toggle X-axis handle visibility |
+| `Y` | Toggle Y-axis handle visibility |
+| `Z` | Toggle Z-axis handle visibility (perspective view only) |
+| `+` / `=` | Increase transform gizmo size |
+| `-` | Decrease transform gizmo size |
+| `I` | Interpolate (continuous-sequence mode, interpolation mode active) |
+| `Delete` / `Backspace` | Delete selected object |
+| `Esc` | Deselect object |
+| Hold `Ctrl` | Snap translation (0.5 units) / rotation (15°) while held |
+
+### Mouse
+
+| Action | Effect |
+|---|---|
+| Left click on box | Select object |
+| `Ctrl` + drag on ground (BEV) | Draw a new bounding box |
+| `Ctrl` + right click on box | Delete object |
+| Scroll wheel over camera image | Zoom image in/out |
+| Scroll wheel over side/front/BEV helper view | Zoom that helper view independently |
 
 <!-- TODO : Insert video -->
 
