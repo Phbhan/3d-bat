@@ -1952,7 +1952,12 @@ class LabelTool3D {
 
         }
         copyLabelToNextFrameCheckbox.onChange((value) => {
-            this.annotationObjects.contents[this.labelTool.currentFrameIndex][folderInsertIdx]["copyLabelToNextFrame"] = value;
+            let selectionIndex = this.annotationObjects.getObjectIndexByTrackIdAndClass(bbox.trackId, bbox.class, this.labelTool.currentFrameIndex);
+            if (selectionIndex !== -1) {
+                this.annotationObjects.contents[this.labelTool.currentFrameIndex][selectionIndex]["copyLabelToNextFrame"] = value;
+            } else {
+                console.log("Could not find object with track ID " + bbox.trackId + " and class " + bbox.class);
+            }
         });
 
         this.folderBoundingBox3DArray[this.folderBoundingBox3DArray.length - 1].add(labelOperations, 'setToDefaultSize').name("Set to default size");
