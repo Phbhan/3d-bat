@@ -1395,7 +1395,15 @@ class LabelTool3D {
                 }
             }
         }
-
+        // The per-channel loop above only clears the camera-image projections.
+        // The BEV footprint (drawn separately by drawBoundingBoxBEV / stored as
+        // box.bev.lines) isn't part of `channels`, so without this it survives
+        // deletion and stays rendered as a ghost box in the BEV panel.
+        const bev = (<any>box).bev;
+        if (bev !== undefined) {
+            this.labelToolImage.removeProjectedBoundingBox(bev);
+        }
+        
         this.annotationObjects.remove(labelIndex, fileIndex);
         this.folderBoundingBox3DArray.splice(labelIndex, 1);
         this.folderPositionArray.splice(labelIndex, 1);
