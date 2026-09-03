@@ -2123,9 +2123,16 @@ class LabelTool3D {
             case "trackID":
                 this.textBoxTrackId.setValue(op.prev, true);
                 break;
-            case "delete":
-                this.addAnnotationObjectFromRect(op.position, op.scale, op.rotation, op.trackId, op.objectIndex, op.objectClass, true);
-                break;
+                case "delete":
+                    this.addAnnotationObjectFromRect(op.position,
+                        op.scale,
+                        op.rotation,
+                        op.trackId,
+                        this.annotationObjects.contents[this.labelTool.currentFrameIndex].length, // append, not stale index
+                        op.objectClass,
+                        true
+                    );
+                    break;
             case "position":
                 this.annotationObjects.undoObjectPosition(op.objectIndex, op.position);
                 break;
