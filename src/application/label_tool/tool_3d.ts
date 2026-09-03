@@ -3858,19 +3858,19 @@ class LabelTool3D {
                 $("#left-btn").css("left", 0);
                 break;
             case KEYS.CODE_R:
-                if (!Key.isCtrlDown()) {
+                if (!event.altKey) {
                     break;
                 }
                 this.setOperationMode('rotate');
                 break;
             case KEYS.CODE_S:
-                if (!Key.isCtrlDown()) {
+                if (!event.altKey) {
                     break;
                 }
                 this.setOperationMode('scale');
                 break;
             case KEYS.CODE_T:
-                if (!Key.isCtrlDown()) {
+                if (!event.altKey) {
                     break;
                 }
                 this.setOperationMode('translate');
