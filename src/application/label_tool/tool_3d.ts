@@ -213,6 +213,7 @@ class LabelTool3D {
         this.annotationObjects.setLabelTool3D(this);
         this.parameters = this.startParameters();
         this.registerRemoveFunction();
+        this.registerListenFocusGuard();
         this.labelToolImage = labelToolImage;
     }
 
@@ -3170,6 +3171,39 @@ class LabelTool3D {
             this.__ul.removeChild(folder.domElement.parentNode);
             delete this.__folders[name];
             this.onResize();
+        };
+    }
+    
+    // Every Position/Rotation/Size field (and the interpolation end-position/size
+    // fields) is a dat.GUI NumberControllerBox created with `.add(bbox, 'x').min().max()`
+    // — min/max are chained *after* add(), not passed as args to it, so dat.GUI gives
+    // us an editable text box rather than a slider. But every one of these controllers
+    // also has `.listen()` on it (so dragging the box in the 3D view keeps the field in
+    // sync). While `.listen()` is active, dat.GUI's internal update loop calls
+    // updateDisplay() on every animation frame and unconditionally overwrites the
+    // field's text with the object's current value. That refresh doesn't check whether
+    // the field is focused, so if you're mid-keystroke, the very next frame (~16ms
+    // later) snaps your typed character back to the old value before you can type a
+    // second one — keyboard entry looks completely broken rather than just glitchy.
+    //
+    // Patch NumberControllerBox.updateDisplay to skip that refresh while its own
+    // <input> is focused. This only suppresses the *display* refresh during editing;
+    // typing, Enter-to-commit, and blur-to-commit still go through dat.GUI's normal
+    // onChange path untouched, so values still propagate to the mesh/annotation object
+    // exactly as before. Once you blur the field, .listen() resumes updating it
+    // immediately (e.g. to reflect subsequent drags in the 3D view).
+    registerListenFocusGuard() {
+        const NumberControllerBox = (dat as any).controllers?.NumberControllerBox;
+        if (!NumberControllerBox) {
+            console.warn("dat.controllers.NumberControllerBox not found — keyboard entry into Position/Rotation/Size fields may be unreliable while .listen() is active.");
+            return;
+        }
+        const originalUpdateDisplay = NumberControllerBox.prototype.updateDisplay;
+        NumberControllerBox.prototype.updateDisplay = function (...args: any[]) {
+            if (this.__input !== undefined && document.activeElement === this.__input) {
+                return this;
+            }
+            return originalUpdateDisplay.apply(this, args);
         };
     }
 
