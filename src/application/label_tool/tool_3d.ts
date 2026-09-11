@@ -1261,7 +1261,7 @@ class LabelTool3D {
         if (this.transformControls !== undefined) {
             if (this.selectedMesh !== undefined) {
                 this.addTransformControls();
-                this.transformControls.size = 1; // set transformControls.size
+                this.transformControls.size = 0.5; // set transformControls.size
                 this.transformControls.showZ = true;
             } else {
                 this.removeTransformControls();
@@ -2239,7 +2239,7 @@ class LabelTool3D {
                 this.transformControls!.attach(this.selectedMesh);
             }
 
-            this.transformControls!.size = 1.0; // set transformControls.size
+            this.transformControls!.size = 0.5; // set transformControls.size
         } else {
             this.removeTransformControls();
         }
