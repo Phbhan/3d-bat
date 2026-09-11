@@ -1,3 +1,4 @@
+import os
 import requests
 from flask import *
 from flask import Flask
@@ -87,15 +88,20 @@ def project_points_route():
 @app.route("/save_annotations", methods=['POST'])
 def save_annotations():
     data = request.json
-    
-    for i in range(len(data['annotationFiles'])):        
-        filePath = path.join('input', data['dataset'], data['sequence'], f"annotations_{data['cameraChannel']}", data['fileNames'][i])
-        with open(filePath, 'w') as f:
-            f.write(data['annotationFiles'][i])
+    try:
+        for i in range(len(data['annotationFiles'])):
+            dirPath = path.join('input', data['dataset'], data['sequence'],
+                                 f"annotations_{data['cameraChannel']}")
+            os.makedirs(dirPath, exist_ok=True)
+            filePath = path.join(dirPath, data['fileNames'][i])
+            with open(filePath, 'w') as f:
+                f.write(data['annotationFiles'][i])
+    except Exception as e:
+        app.logger.exception("save_annotations failed")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
-    return {
-        'status': 'success'
-    }
+    return {'status': 'success'}
+
 
 @app.route("/save_detections", methods=['POST'])
 def save_detections():
