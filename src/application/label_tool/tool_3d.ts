@@ -2187,11 +2187,6 @@ class LabelTool3D {
     }
 
     saveAnnotations = async () => {
-        // Only save the current frame's annotation file, not the whole sequence.
-        // createAnnotationFiles() still builds content for every frame (it returns an array
-        // indexed the same way as annotationFileNames), but we slice down to just the frame
-        // the user is actually working on before sending it over the wire, so the backend only
-        // ever writes one file per autosave tick instead of rewriting the entire sequence.
         const currentFrameIndex = this.labelTool.currentFrameIndex;
         const allAnnotationFiles = getLoader(this.labelTool).createAnnotationFiles(this.labelTool);
         const annotationFiles = {
@@ -2205,7 +2200,10 @@ class LabelTool3D {
         const requestInit: RequestInit = this.requestInitFromJson(annotationFiles);
         const response = await fetch('/save_annotations', requestInit);
         if (!response.ok) {
-            throw Error("Response status not OK")
+            const bodyText = await response.text().catch(() => '<no body>');
+            console.error(`saveAnnotations failed: ${response.status} ${response.statusText} — ${bodyText}`);
+            console.error('Request payload was:', annotationFiles);
+            throw Error(`Response status not OK (${response.status})`);
         }
     }
 
