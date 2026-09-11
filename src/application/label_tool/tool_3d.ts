@@ -348,19 +348,28 @@ class LabelTool3D {
         this.renderer.domElement.addEventListener('resize', () => {
             // update height and top position of helper views
             let imagePanelHeight = parseInt($("#layout_layout_resizer_top").css("top"), 10);
-            let newHeight = Math.round((window.innerHeight - this.labelToolImage.headerHeight - imagePanelHeight) / 3.0);
+            let newHeight = LabelTool3D.helperViewHeight(window.innerHeight - this.labelToolImage.headerHeight - imagePanelHeight);
+
+            // Same bev-topmost/side-middle/front-bottommost stacking as
+            // initViews(); the WebGL viewport Y for each is derived from
+            // this same CSS top via toViewportY() so the rendered content
+            // and its bordered overlay panel stay in sync here too.
+            const bevCssTop = this.labelToolImage.headerHeight + imagePanelHeight;
+            const sideCssTop = bevCssTop + newHeight;
+            const frontCssTop = bevCssTop + 2 * newHeight;
+
             $("#canvasBev").css("height", newHeight);
-            $("#canvasBev").css("top", this.labelToolImage.headerHeight + imagePanelHeight );
+            $("#canvasBev").css("top", bevCssTop);
             this.views[1].height = newHeight;
-            this.views[1].top = 2 * newHeight;
+            this.views[1].top = this.toViewportY(bevCssTop, newHeight);
             $("#canvasSideView").css("height", newHeight);
-            $("#canvasSideView").css("top", this.labelToolImage.headerHeight + imagePanelHeight+ newHeight);
+            $("#canvasSideView").css("top", sideCssTop);
             this.views[2].height = newHeight;
-            this.views[2].top = newHeight;
+            this.views[2].top = this.toViewportY(sideCssTop, newHeight);
             $("#canvasFrontView").css("height", newHeight);
-            $("#canvasFrontView").css("top", this.labelToolImage.headerHeight + imagePanelHeight + 2 * newHeight);
+            $("#canvasFrontView").css("top", frontCssTop);
             this.views[3].height = newHeight;
-            this.views[3].top = 0;
+            this.views[3].top = this.toViewportY(frontCssTop, newHeight);
 
             (<PerspectiveCamera>this.currentCamera).aspect = window.innerWidth / window.innerHeight;
             this.currentCamera.updateProjectionMatrix();
@@ -829,19 +838,83 @@ class LabelTool3D {
         return () => restoreOps.forEach(restore => restore());
     }
 
-    // Max distance (in the same units as the point cloud/annotations, typically
-    // meters) from the selected object's center that points are still shown in
-    // the side/front/BEV helper views. Points farther away are clipped out so
-    // the helper views stay focused on the object being labeled instead of
-    // showing the whole surrounding scan. Does not affect the main view.
-    static readonly HELPER_VIEW_POINT_CLOUD_RADIUS = 5;
+    // Extra room (meters) added around the selected object's own extent when
+    // clipping the point cloud for the side/front/BEV helper views. Kept
+    // small and constant — unlike HELPER_VIEW_POINT_CLOUD_RADIUS below
+    // (removed), the clip region itself now scales with the object's size,
+    // so this margin just keeps the box from being clipped flush against
+    // its own surface.
+    static readonly HELPER_VIEW_POINT_CLOUD_MARGIN = 0.5;
 
-    // Temporarily restricts the currently-loaded point cloud to a cube of side
-    // 2*HELPER_VIEW_POINT_CLOUD_RADIUS centered on the selected object, using
-    // per-material clipping planes, and returns a function that restores the
-    // previous (unclipped) state. Call this right before rendering the helper
-    // views and call the returned function right after, same pattern as
-    // isolateSelectedBoxForHelperViews().
+    // Helper views (BEV/side/front) now show only a small clipped region of
+    // point cloud around the selected object (see
+    // clipPointCloudForHelperViews), so a panel sized to a full third of the
+    // window is oversized for what little it actually displays. These shrink
+    // each panel's width/height independently; used everywhere a panel's
+    // size — or anything laid out to make room next to it (class picker,
+    // prev/next nav button) — is computed, so they all stay in agreement.
+    static readonly HELPER_VIEW_WIDTH_SCALE = 0.6;
+    static readonly HELPER_VIEW_HEIGHT_SCALE = 0.95;
+
+    // Width (px) of a helper view panel at the current window size. Single
+    // source of truth for the panel's THREE.js viewport (see initViews'
+    // views array) and its DOM overlay canvas (used only to capture
+    // scroll-wheel zoom — see attachHelperViewZoomHandlers — never actually
+    // drawn into), so the wheel-zoom hit area always matches where the
+    // panel is actually rendered.
+    private static helperViewWidth(): number {
+        return Math.round((window.innerWidth / 3) * LabelTool3D.HELPER_VIEW_WIDTH_SCALE);
+    }
+
+    // Height (px) of a single stacked helper view panel, given the vertical
+    // space available below the camera image panels (callers compute that
+    // available space slightly differently in a couple of places, so it's
+    // passed in rather than hardcoded here).
+    private static helperViewHeight(availableHeight: number): number {
+        return Math.round((availableHeight / 3) * LabelTool3D.HELPER_VIEW_HEIGHT_SCALE);
+    }
+
+    // Left offset (px) of the helper-view panels. Pinned to the window's
+    // left edge, directly below the camera image row (same x=0 column the
+    // camera panels themselves start from).
+    private helperViewLeft(): number {
+        return 0;
+    }
+
+    // Right edge (px) of the helper-view panels — i.e. helperViewLeft() +
+    // panel width. Used to position things that sit to the right of the
+    // panels (class picker, prev/next nav button).
+    private helperViewRightEdge(): number {
+        return this.helperViewLeft() + LabelTool3D.helperViewWidth();
+    }
+
+    // renderer.setViewport()/setScissor() take a y offset measured from the
+    // BOTTOM of the render target, while every helper-view panel position in
+    // this file (its bordered overlay canvas, used for the wheel-zoom hit
+    // area — see attachHelperViewZoomHandlers) is expressed as a CSS `top`,
+    // measured from the TOP of the page. Converts the latter to the former
+    // so the actual rendered point cloud/box (the "view") and the bordered
+    // overlay panel framing it always refer to the exact same screen
+    // rectangle — previously these two coordinate systems were only kept in
+    // sync by coincidence, when the 3 stacked panels exactly filled the
+    // leftover vertical space below the camera row; once panels stopped
+    // filling that space (see HELPER_VIEW_WIDTH_SCALE / HELPER_VIEW_HEIGHT_SCALE),
+    // the WebGL-rendered content drifted away from the overlay panel meant to frame it.
+    private toViewportY(cssTop: number, panelHeight: number): number {
+        return window.innerHeight - cssTop - panelHeight;
+    }
+
+    // Temporarily restricts the currently-loaded point cloud to a box centered
+    // on, and sized to, the selected object (its own length/width/height plus
+    // HELPER_VIEW_POINT_CLOUD_MARGIN) using per-material clipping planes, and
+    // returns a function that restores the previous (unclipped) state. Call
+    // this right before rendering the helper views and call the returned
+    // function right after, same pattern as isolateSelectedBoxForHelperViews().
+    //
+    // Sizing the clip region to the object itself (rather than a fixed
+    // radius) keeps small objects tightly framed — so neighboring
+    // cars/pedestrians don't bleed into the helper views — while still
+    // giving large objects (buses, trucks) enough room to fit in full.
     clipPointCloudForHelperViews(selectedMesh: Mesh): () => void {
         const pointCloud = this.pointCloudScanMap[this.labelTool.currentFrameIndex];
         if (!pointCloud || !pointCloud.material) {
@@ -849,18 +922,35 @@ class LabelTool3D {
         }
 
         const center = LabelTool3D.getObjectCenter(selectedMesh);
-        const r = LabelTool3D.HELPER_VIEW_POINT_CLOUD_RADIUS;
+        const margin = LabelTool3D.HELPER_VIEW_POINT_CLOUD_MARGIN;
 
-        // Axis-aligned box clip (cheap, uses THREE's built-in material clipping
-        // planes) rather than a true sphere: keep center.x-r <= x <= center.x+r,
-        // and likewise for y and z.
+        // Clip along the box's own (yaw-rotated) length/width axes, not world
+        // X/Y. Using a world-axis-aligned box here previously meant sizing
+        // both X and Y off the box's diagonal (sqrt(length^2+width^2)/2) to
+        // avoid clipping into a rotated box's corners — but for a typical
+        // non-square box (e.g. a 4.5m x 2m car) that inflates the SHORT axis
+        // (width) up to the diagonal too, letting in ~1.5m of extra point
+        // cloud on each side no matter how small the margin is. Rotating the
+        // clip planes with the box instead means each face only ever gets
+        // its own half-dimension + margin.
+        const yaw = selectedMesh.rotation.z;
+        const forward = new Vector3(Math.cos(yaw), Math.sin(yaw), 0);   // along box length
+        const lateral = new Vector3(-Math.sin(yaw), Math.cos(yaw), 0);  // along box width
+
+        const halfLength = selectedMesh.scale.x / 2 + margin;
+        const halfWidth = selectedMesh.scale.y / 2 + margin;
+        const halfHeight = selectedMesh.scale.z / 2 + margin;
+
+        const forwardDotCenter = forward.dot(center);
+        const lateralDotCenter = lateral.dot(center);
+
         const clippingPlanes = [
-            new Plane(new Vector3(1, 0, 0), r - center.x),   // keep x >= center.x - r
-            new Plane(new Vector3(-1, 0, 0), r + center.x),  // keep x <= center.x + r
-            new Plane(new Vector3(0, 1, 0), r - center.y),   // keep y >= center.y - r
-            new Plane(new Vector3(0, -1, 0), r + center.y),  // keep y <= center.y + r
-            new Plane(new Vector3(0, 0, 1), r - center.z),   // keep z >= center.z - r
-            new Plane(new Vector3(0, 0, -1), r + center.z),  // keep z <= center.z + r
+            new Plane(forward.clone(), halfLength - forwardDotCenter),               // keep within halfLength behind
+            new Plane(forward.clone().negate(), halfLength + forwardDotCenter),      // ...and ahead, along box length
+            new Plane(lateral.clone(), halfWidth - lateralDotCenter),                // keep within halfWidth to one side
+            new Plane(lateral.clone().negate(), halfWidth + lateralDotCenter),       // ...and the other, along box width
+            new Plane(new Vector3(0, 0, 1), halfHeight - center.z),                  // keep z >= center.z - halfHeight
+            new Plane(new Vector3(0, 0, -1), halfHeight + center.z),                 // keep z <= center.z + halfHeight
         ];
 
         const material = pointCloud.material as PointsMaterial;
@@ -932,8 +1022,22 @@ class LabelTool3D {
 
     initViews() {
 
-        let viewHeight;
-        viewHeight = Math.round((window.innerHeight - this.labelToolImage.canvasArray[0].scrollHeight) / 3);
+        let viewHeight = LabelTool3D.helperViewHeight(window.innerHeight - this.labelToolImage.canvasArray[0].scrollHeight);
+        let viewWidth = LabelTool3D.helperViewWidth();
+        let viewLeft = this.helperViewLeft();
+
+        // CSS top (from the top of the page) for each panel, stacked
+        // directly below the camera image row — bev topmost (right under
+        // the camera row), then side, then front at the bottom of the
+        // stack (matches the original stacking order). This is the single
+        // source of truth for each panel's vertical position; the WebGL
+        // viewport Y below is derived from it via toViewportY() rather than
+        // computed independently, so the rendered content and the bordered
+        // overlay panel can't drift apart again.
+        const cameraRowBottom = this.labelToolImage.canvasArray[0].scrollHeight;
+        const bevCssTop = cameraRowBottom;
+        const sideCssTop = cameraRowBottom + viewHeight;
+        const frontCssTop = cameraRowBottom + 2 * viewHeight;
 
         this.views = [
             // main view
@@ -950,9 +1054,9 @@ class LabelTool3D {
             // bev view
             {
                 name: "bev",
-                left: 0,
-                top: 2 * viewHeight,
-                width: window.innerWidth / 3,
+                left: viewLeft,
+                top: this.toViewportY(bevCssTop, viewHeight),
+                width: viewWidth,
                 height: viewHeight,
                 background: new THREE.Color(22 / 256.0, 22 / 256.0, 22 / 256.0),
                 up: [0, 0, 0],
@@ -968,9 +1072,9 @@ class LabelTool3D {
             // side view
             {
                 name: "side",
-                left: 0,
-                top: viewHeight,
-                width: window.innerWidth / 3,
+                left: viewLeft,
+                top: this.toViewportY(sideCssTop, viewHeight),
+                width: viewWidth,
                 height: viewHeight,
                 background: new THREE.Color(22 / 256.0, 22 / 256.0, 22 / 256.0),
                 up: [0, -1, 0],
@@ -988,9 +1092,9 @@ class LabelTool3D {
             // front view
             {
                 name: "front",
-                left: 0,
-                top: 0,
-                width: window.innerWidth / 3,
+                left: viewLeft,
+                top: this.toViewportY(frontCssTop, viewHeight),
+                width: viewWidth,
                 height: viewHeight,
                 background: new THREE.Color(22 / 256.0, 22 / 256.0, 22 / 256.0),
                 up: [-1, 0, 0],
@@ -1008,11 +1112,14 @@ class LabelTool3D {
             ];
 
         $("#canvasBev").css("height", viewHeight);
-        $("#canvasBev").css("top", this.labelToolImage.canvasArray[0].scrollHeight);
+        $("#canvasBev").css("top", bevCssTop);
+        $("#canvasBev").css("left", viewLeft);
         $("#canvasSideView").css("height", viewHeight);
-        $("#canvasSideView").css("top", this.labelToolImage.canvasArray[0].scrollHeight + viewHeight);
+        $("#canvasSideView").css("top", sideCssTop);
+        $("#canvasSideView").css("left", viewLeft);
         $("#canvasFrontView").css("height", viewHeight);
-        $("#canvasFrontView").css("top", this.labelToolImage.canvasArray[0].scrollHeight + 2 * viewHeight);
+        $("#canvasFrontView").css("top", frontCssTop);
+        $("#canvasFrontView").css("left", viewLeft);
 
         let mainView = this.views[0];
         let mainCamera = new PerspectiveCamera(70, window.innerWidth / window.innerHeight, 1, 3000);
@@ -1099,8 +1206,8 @@ class LabelTool3D {
         this.canvasBEV = document.createElement("canvas");
         this.canvasBEV.id = "canvasBev";
 
-        let widthBev = window.innerWidth / 3;
-        let heightBev = (window.innerHeight - this.labelToolImage.canvasArray[0].scrollHeight) / 3;
+        let widthBev = LabelTool3D.helperViewWidth();
+        let heightBev = LabelTool3D.helperViewHeight(window.innerHeight - this.labelToolImage.canvasArray[0].scrollHeight);
 
         this.canvasBEV.width = widthBev;
         this.canvasBEV.height = heightBev;
@@ -1108,6 +1215,7 @@ class LabelTool3D {
         $("body").append(this.canvasBEV);
         $("#canvasBev").css({
             top: this.labelToolImage.canvasArray[0].scrollHeight +'px',
+            left: this.helperViewLeft() + 'px',
             position: "absolute"
         });
 
@@ -1142,8 +1250,8 @@ class LabelTool3D {
         this.canvasFrontView = document.createElement("canvas");
         this.canvasFrontView.id = "canvasFrontView";
 
-        const widthFrontView = window.innerWidth / 3;
-        let heightFrontView = (window.innerHeight - this.labelToolImage.canvasArray[0].scrollHeight) / 3;
+        const widthFrontView = LabelTool3D.helperViewWidth();
+        let heightFrontView = LabelTool3D.helperViewHeight(window.innerHeight - this.labelToolImage.canvasArray[0].scrollHeight);
 
         this.canvasFrontView.width = widthFrontView;
         this.canvasFrontView.height = heightFrontView;
@@ -1151,6 +1259,7 @@ class LabelTool3D {
         $("body").append(this.canvasFrontView);
         $("#canvasFrontView").css({
             top: this.labelToolImage.canvasArray[0].scrollHeight + 2 * heightFrontView + "px",
+            left: this.helperViewLeft() + 'px',
             position: "absolute"
         });
 
@@ -1180,9 +1289,9 @@ class LabelTool3D {
         this.canvasSideView = document.createElement("canvas");
         this.canvasSideView.id = "canvasSideView";
 
-        let widthSideView = window.innerWidth / 3;
+        let widthSideView = LabelTool3D.helperViewWidth();
         let heightSideView;
-        heightSideView = (window.innerHeight - this.labelToolImage.canvasArray[0].scrollHeight) / 3;
+        heightSideView = LabelTool3D.helperViewHeight(window.innerHeight - this.labelToolImage.canvasArray[0].scrollHeight);
 
         this.canvasSideView.width = widthSideView;
         this.canvasSideView.height = heightSideView;
@@ -1190,6 +1299,7 @@ class LabelTool3D {
         $("body").append(this.canvasSideView);
         $("#canvasSideView").css({
             top: this.labelToolImage.canvasArray[0].scrollHeight + heightSideView + 'px',
+            left: this.helperViewLeft() + 'px',
             position: 'absolute'});
 
         this.cameraSideView = new OrthographicCamera(
@@ -1220,7 +1330,7 @@ class LabelTool3D {
         this.showFrontView();
         this.showBEV(xPos, yPos, zPos);//width along x-axis (lateral), height along y axis (longitudinal)
         // move class picker to right
-        $("#class-picker").css("left", window.innerWidth / 3 + 10);
+        $("#class-picker").css("left", this.helperViewRightEdge() + 10);
         // the canvasSideView/canvasFrontView/canvasBev elements are created lazily
         // above, so wire up their scroll-to-zoom handlers now that they exist
         this.attachHelperViewZoomHandlers();
@@ -2252,7 +2362,7 @@ class LabelTool3D {
         this.labelToolImage.update2DBoundingBox(this.labelTool.currentFrameIndex, this.clickedObjectIndex, true);
 
         // move button to right
-        $("#left-btn").css("left", window.innerWidth / 3);
+        $("#left-btn").css("left", this.helperViewRightEdge());
 
         let obj = this.annotationObjects.contents[this.labelTool.currentFrameIndex][this.clickedObjectIndex];
 
@@ -2808,7 +2918,7 @@ class LabelTool3D {
                 $("#tooltip-" + this.annotationObjects.contents[fileIndex][insertIndex]["class"] + "-" + this.annotationObjects.contents[fileIndex][insertIndex]["trackId"]).hide();
 
                 // move left button to right
-                $("#left-btn").css("left", window.innerWidth / 3);
+                $("#left-btn").css("left", this.helperViewRightEdge());
                 this.showHelperViews(pos.x, pos.y, pos.z);
 
                 this.annotationObjects.select(insertIndex);

@@ -206,10 +206,15 @@ text {
 
 #canvasBev {
     position: fixed;
-    width: 33.33vw;
+    /* width intentionally not set here — the JS-side helper-view sizing
+       (LabelTool3D.helperViewWidth(), scaled by HELPER_VIEW_SCALE) sets the
+       canvas element's own width attribute, which the browser uses as its
+       displayed size as long as no CSS width overrides it here. A fixed
+       33.33vw here previously always won over that JS-driven width. */
     /*height: 311px;*/
     z-index: 102;
-    left: 0px;
+    /* left intentionally not set here — JS (LabelTool3D.helperViewLeft())
+       sets an inline left to center the panel under the camera image row. */
     /*top: 910px;*/
     border: 1px;
     border-style: outset;
@@ -217,10 +222,10 @@ text {
 
 #canvasFrontView {
     position: fixed;
-    width: 33.33vw;
+    /* width intentionally not set here — see #canvasBev above */
     /*height: 311px;*/
     z-index: 102;
-    left: 0px;
+    /* left intentionally not set here — see #canvasBev above */
     /*top: 600px;*/
     border: 1px;
     border-style: outset;
@@ -228,10 +233,10 @@ text {
 
 #canvasSideView {
     position: fixed;
-    width: 33.33vw;
+    /* width intentionally not set here — see #canvasBev above */
     /*height: 311px;*/
     z-index: 102;
-    left: 0px;
+    /* left intentionally not set here — see #canvasBev above */
     /*top: 290px;*/
     border: 1px;
     border-style: outset;
