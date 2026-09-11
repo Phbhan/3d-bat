@@ -655,6 +655,18 @@ class LabelTool3D {
             let downloadAnnotationsItem = $($('#bounding-box-3d-menu ul li')[0]);
             let downloadAnnotationsDivItem = downloadAnnotationsItem.children().first();
             downloadAnnotationsDivItem.wrap("<a href=\"\"></a>");
+            // An anchor's default click action is to navigate to its href. This
+            // wrapper anchor starts (and, if downloadAnnotations() fails before
+            // updating it, stays) at href="" — navigating there reloads the
+            // whole app. downloadAnnotations() below no longer depends on this
+            // anchor's href/download attributes to trigger the actual file
+            // save (it builds and clicks its own throwaway <a> once the zip is
+            // ready), so this wrapper's only remaining job is to make the
+            // button look/behave like a link — its default navigation is never
+            // wanted and is unconditionally suppressed here.
+            downloadAnnotationsDivItem.parent().on('click', (e) => {
+                e.preventDefault();
+            });
             this.colorMap = FileOperations.loadColorMap(this.activeColorMap);
             if (this.showProjectedPointsFlag === true) {
                 this.labelToolImage.showProjectedPoints(this.pointCloudScanMap[this.labelTool.currentFrameIndex]);
@@ -2106,8 +2118,50 @@ class LabelTool3D {
         for (let i = 0; i < annotationFiles.length; i++) {
             zip.file(getLoader(this.labelTool).getFilename(this.labelTool, i), annotationFiles[i]);
         }
-        let zipContent = zip.generate();
-        $($('#bounding-box-3d-menu ul li')[0]).children().first().attr('href', 'data:application/zip;base64,' + zipContent).attr('download', String(this.labelTool.currentDataset + "_" + this.labelTool.currentSequence + '_annotations.zip'));
+        const filename = String(this.labelTool.currentDataset + "_" + this.labelTool.currentSequence + '_annotations.zip');
+
+        // Actually trigger the browser download via a throwaway <a> element +
+        // Blob URL, rather than writing href/download onto the persistent GUI
+        // button (see the click handler installed right after that button is
+        // created — that button's own href is never used for the download
+        // anymore, only suppressed from navigating).
+        const triggerDownload = (blob: Blob) => {
+            const url = URL.createObjectURL(blob);
+            const tempLink = document.createElement('a');
+            tempLink.href = url;
+            tempLink.download = filename;
+            document.body.appendChild(tempLink);
+            tempLink.click();
+            document.body.removeChild(tempLink);
+            // give the browser a moment to pick up the blob URL before freeing it
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        };
+
+        try {
+            if (typeof (zip as any).generateAsync === 'function') {
+                // JSZip v3+: the synchronous .generate() this code used to call
+                // was removed in favor of this Promise-based API. Calling the
+                // removed method threw here, which meant this function bailed
+                // out having never updated the download button's href/download
+                // attributes — leaving them at their initial, reload-triggering
+                // state (see the click handler comment above).
+                (zip as any).generateAsync({type: 'blob'})
+                    .then(triggerDownload)
+                    .catch((error: any) => console.error('Error generating annotations zip:', error));
+            } else {
+                // Older JSZip (synchronous, base64 string) — kept as a fallback
+                // in case this project's JSZip version still supports it.
+                const zipContentBase64 = (zip as any).generate();
+                const byteChars = atob(zipContentBase64);
+                const byteNumbers = new Array(byteChars.length);
+                for (let i = 0; i < byteChars.length; i++) {
+                    byteNumbers[i] = byteChars.charCodeAt(i);
+                }
+                triggerDownload(new Blob([new Uint8Array(byteNumbers)], {type: 'application/zip'}));
+            }
+        } catch (error) {
+            console.error('Error generating annotations zip:', error);
+        }
     }
 
     undoOperation(): void {
